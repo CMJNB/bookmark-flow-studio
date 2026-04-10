@@ -18,6 +18,8 @@ type FolderTreeNode = {
   children: FolderTreeNode[]
 }
 
+type PageKey = "select" | "export" | "import" | "compare"
+
 function formatDateForFileName(date: Date): string {
   const yyyy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, "0")
@@ -334,7 +336,19 @@ function buildAiPrompt(yamlData: string): string {
     "      - title: \"书签标题\"",
     "        url: \"https://example.com\"",
     "",
-    "只输出 YAML，不要附加解释。"
+    "# 输出封装要求",
+    "1. 最终输出必须使用一个代码段包裹，语言标记为 yaml。",
+    "2. 代码段内只允许出现 YAML 数据本体，不要出现 Markdown 标题、说明或注释。",
+    "3. 代码段外不要输出任何额外文字。",
+    "",
+    "示例：",
+    "```yaml",
+    "organized_bookmarks:",
+    "  - title: \"分类名\"",
+    "    children:",
+    "      - title: \"书签标题\"",
+    "        url: \"https://example.com\"",
+    "```"
   ].join("\n")
 }
 
@@ -437,9 +451,13 @@ async function createRecursive(parentId: string, item: ExportNode): Promise<void
 
 function IndexPopup() {
   const [tree, setTree] = useState<BookmarkNode[]>([])
+  const [activePage, setActivePage] = useState<PageKey>("select")
   const [folderTree, setFolderTree] = useState<FolderTreeNode[]>([])
   const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([])
   const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
+  const [compareSetA, setCompareSetA] = useState<string[]>([])
+  const [compareSetB, setCompareSetB] = useState<string[]>([])
+  const [compareResult, setCompareResult] = useState("尚未执行对比")
   const [slimMode, setSlimMode] = useState(true)
   const [autoBackup, setAutoBackup] = useState(true)
   const [status, setStatus] = useState("等待操作")
@@ -639,6 +657,55 @@ function IndexPopup() {
     setExpandedFolderIds([])
   }
 
+  const folderTitleById = (id: string): string => {
+    return allNodes.get(id)?.title || `未知目录(${id})`
+  }
+
+  const saveSelectionAsA = (): void => {
+    setCompareSetA([...new Set(selectedFolderIds)])
+    setStatus("当前选择已保存为集合 A")
+  }
+
+  const saveSelectionAsB = (): void => {
+    setCompareSetB([...new Set(selectedFolderIds)])
+    setStatus("当前选择已保存为集合 B")
+  }
+
+  const runSelectionCompare = (): void => {
+    const setA = new Set(compareSetA)
+    const setB = new Set(compareSetB)
+
+    const onlyA = [...setA].filter((id) => !setB.has(id))
+    const onlyB = [...setB].filter((id) => !setA.has(id))
+    const both = [...setA].filter((id) => setB.has(id))
+
+    const lines: string[] = []
+    lines.push(`集合A数量: ${setA.size}`)
+    lines.push(`集合B数量: ${setB.size}`)
+    lines.push(`仅A: ${onlyA.length}`)
+    lines.push(`仅B: ${onlyB.length}`)
+    lines.push(`交集: ${both.length}`)
+    lines.push("")
+    lines.push("仅A目录:")
+    lines.push(...(onlyA.length ? onlyA.map((id) => `- ${folderTitleById(id)} (${id})`) : ["- 无"]))
+    lines.push("")
+    lines.push("仅B目录:")
+    lines.push(...(onlyB.length ? onlyB.map((id) => `- ${folderTitleById(id)} (${id})`) : ["- 无"]))
+    lines.push("")
+    lines.push("交集目录:")
+    lines.push(...(both.length ? both.map((id) => `- ${folderTitleById(id)} (${id})`) : ["- 无"]))
+
+    setCompareResult(lines.join("\n"))
+    setStatus("对比完成")
+  }
+
+  const clearCompareSets = (): void => {
+    setCompareSetA([])
+    setCompareSetB([])
+    setCompareResult("尚未执行对比")
+    setStatus("已清空对比集合")
+  }
+
   const renderFolderTree = (nodes: FolderTreeNode[], depth = 0): JSX.Element[] => {
     return nodes.map((node) => {
       const expanded = expandedFolderIds.includes(node.id)
@@ -678,82 +745,129 @@ function IndexPopup() {
       </header>
 
       <section className="card">
-        <h2>选择导出范围</h2>
-        <p className="muted">{selectedCountLabel}</p>
-        <div className="folder-list">
-          {renderFolderTree(folderTree)}
-        </div>
-        <div className="controls">
-          <button className="link-btn" onClick={selectAllFolders}>
-            全选
+        <h2>操作步骤</h2>
+        <div className="pager">
+          <button className={`page-btn ${activePage === "select" ? "active" : ""}`} onClick={() => setActivePage("select")}>
+            1. 选择范围
           </button>
-          <button className="link-btn" onClick={clearFolderSelection}>
-            清空
+          <button className={`page-btn ${activePage === "export" ? "active" : ""}`} onClick={() => setActivePage("export")}>
+            2. 导出与提示词
           </button>
-          <button className="link-btn" onClick={expandAllFolders}>
-            全部展开
+          <button className={`page-btn ${activePage === "import" ? "active" : ""}`} onClick={() => setActivePage("import")}>
+            3. 导入
           </button>
-          <button className="link-btn" onClick={collapseAllFolders}>
-            全部收起
+          <button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>
+            4. 选择对比
           </button>
         </div>
       </section>
 
-      <section className="card">
-        <h2>导出与提示词</h2>
-        <label className="check">
-          <input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
-          <span>精简模式（仅 title/url/children）</span>
-        </label>
-        <button className="btn primary" onClick={() => void exportJson(false)}>
-          导出 JSON
-        </button>
-        <button className="btn ok" onClick={() => void exportAiPrompt()}>
-          生成 AI 分类提示词（含 YAML 数据）
-        </button>
-      </section>
+      {activePage === "select" ? (
+        <section className="card">
+          <h2>选择导出范围</h2>
+          <p className="muted">{selectedCountLabel}</p>
+          <div className="folder-list">{renderFolderTree(folderTree)}</div>
+          <div className="controls">
+            <button className="link-btn" onClick={selectAllFolders}>
+              全选
+            </button>
+            <button className="link-btn" onClick={clearFolderSelection}>
+              清空
+            </button>
+            <button className="link-btn" onClick={expandAllFolders}>
+              全部展开
+            </button>
+            <button className="link-btn" onClick={collapseAllFolders}>
+              全部收起
+            </button>
+          </div>
+        </section>
+      ) : null}
 
-      <section className="card">
-        <h2>导入</h2>
-        <label className="check">
-          <input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)} />
-          <span>导入前自动备份当前书签</span>
-        </label>
-        <input
-          type="file"
-          accept="application/json,.json,text/yaml,.yaml,.yml"
-          onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-        />
-        <button className="btn warn" onClick={() => void importFromFile()}>
-          从文件导入（JSON/YAML）
-        </button>
-        <textarea
-          className="paste-input"
-          placeholder="也可以直接粘贴 JSON 或 YAML 到这里再导入"
-          value={pastedData}
-          onChange={(e) => setPastedData(e.target.value)}
-        />
-        <button className="btn warn" onClick={() => void importFromPastedData()}>
-          从粘贴内容导入
-        </button>
-      </section>
+      {activePage === "export" ? (
+        <>
+          <section className="card">
+            <h2>导出与提示词</h2>
+            <label className="check">
+              <input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
+              <span>精简模式（仅 title/url/children）</span>
+            </label>
+            <button className="btn primary" onClick={() => void exportJson(false)}>
+              导出 JSON
+            </button>
+            <button className="btn ok" onClick={() => void exportAiPrompt()}>
+              生成 AI 分类提示词（含 YAML 数据）
+            </button>
+          </section>
+
+          <section className="card">
+            <h2>AI 提示词预览</h2>
+            <div className="controls">
+              <button className="link-btn" onClick={() => void copyAiPrompt()}>
+                一键复制提示词
+              </button>
+              <button className="link-btn" onClick={() => void downloadAiPrompt()}>
+                下载提示词
+              </button>
+            </div>
+            <pre className="prompt">{promptText || "生成后会显示在这里"}</pre>
+          </section>
+        </>
+      ) : null}
+
+      {activePage === "import" ? (
+        <section className="card">
+          <h2>导入</h2>
+          <label className="check">
+            <input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)} />
+            <span>导入前自动备份当前书签</span>
+          </label>
+          <input
+            type="file"
+            accept="application/json,.json,text/yaml,.yaml,.yml"
+            onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+          />
+          <button className="btn warn" onClick={() => void importFromFile()}>
+            从文件导入（JSON/YAML）
+          </button>
+          <textarea
+            className="paste-input"
+            placeholder="也可以直接粘贴 JSON 或 YAML 到这里再导入"
+            value={pastedData}
+            onChange={(e) => setPastedData(e.target.value)}
+          />
+          <button className="btn warn" onClick={() => void importFromPastedData()}>
+            从粘贴内容导入
+          </button>
+        </section>
+      ) : null}
+
+      {activePage === "compare" ? (
+        <section className="card">
+          <h2>选择集对比</h2>
+          <p className="muted">先在“选择范围”页调整勾选，再保存到集合 A / B 进行对比。</p>
+          <p className="muted">当前集合 A: {compareSetA.length}，集合 B: {compareSetB.length}</p>
+          <div className="controls wrap">
+            <button className="link-btn" onClick={saveSelectionAsA}>
+              将当前选择保存为 A
+            </button>
+            <button className="link-btn" onClick={saveSelectionAsB}>
+              将当前选择保存为 B
+            </button>
+            <button className="link-btn" onClick={runSelectionCompare}>
+              执行 A/B 对比
+            </button>
+            <button className="link-btn" onClick={clearCompareSets}>
+              清空对比集合
+            </button>
+          </div>
+          <pre className="status">{compareResult}</pre>
+        </section>
+      ) : null}
 
       <section className="card">
         <h2>状态</h2>
         <pre className="status">{status}</pre>
-      </section>
-
-      <section className="card">
-        <h2>AI 提示词预览</h2>
-        <div className="controls">
-          <button className="link-btn" onClick={() => void copyAiPrompt()}>
-            一键复制提示词
-          </button>
-          <button className="link-btn" onClick={() => void downloadAiPrompt()}>
-            下载提示词
-          </button>
-        </div>
-        <pre className="prompt">{promptText || "生成后会显示在这里"}</pre>
       </section>
     </main>
   )

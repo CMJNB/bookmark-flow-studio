@@ -1,4 +1,6 @@
 :root {
+  --popup-width: 420px;
+  --popup-height: 560px;
   --bg: #f5f7fb;
   --card: #ffffff;
   --text: #1f2937;
@@ -18,16 +20,19 @@
 
 html,
 body {
-  width: 100%;
-  height: 100%;
+  width: var(--popup-width);
+  height: var(--popup-height);
   overflow: hidden;
 }
 
 body {
   margin: 0;
-  min-width: 420px;
-  max-width: 420px;
-  min-height: 620px;
+  width: var(--popup-width);
+  min-width: var(--popup-width);
+  max-width: var(--popup-width);
+  height: var(--popup-height);
+  min-height: var(--popup-height);
+  max-height: var(--popup-height);
   background: radial-gradient(circle at 0% 0%, #eef2ff 0%, var(--bg) 45%, #ecfeff 100%);
   color: var(--text);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -43,6 +48,7 @@ body {
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .header h1 {
@@ -135,6 +141,33 @@ body {
   margin-top: 8px;
   display: flex;
   gap: 8px;
+}
+
+.controls.wrap {
+  flex-wrap: wrap;
+}
+
+.pager {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.page-btn {
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #334155;
+}
+
+.page-btn.active {
+  border-color: #1d4ed8;
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-weight: 600;
 }
 
 .link-btn {
