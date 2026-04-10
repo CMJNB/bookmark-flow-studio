@@ -1,0 +1,173 @@
+import type { BookmarkEntry, BookmarkNode } from "../types/bookmark"
+
+export type CompareStats = {
+  aEntryCount: number
+  bEntryCount: number
+  titleOnlyACount: number
+  titleOnlyBCount: number
+  titleBothCount: number
+  urlOnlyACount: number
+  urlOnlyBCount: number
+  urlBothCount: number
+  sameTitleDifferentUrlCount: number
+}
+
+export type SameTitleDiffItem = {
+  title: string
+  aUrls: string[]
+  bUrls: string[]
+}
+
+export type CompareResult = {
+  stats: CompareStats
+  titleOnlyA: BookmarkEntry[]
+  titleOnlyB: BookmarkEntry[]
+  urlOnlyA: BookmarkEntry[]
+  urlOnlyB: BookmarkEntry[]
+  sameTitleDifferentUrl: SameTitleDiffItem[]
+}
+
+function normalizeText(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function collectBookmarkEntries(nodes: BookmarkNode[]): BookmarkEntry[] {
+  const entries: BookmarkEntry[] = []
+
+  const walk = (node: BookmarkNode, folderPath: string[]): void => {
+    if (Array.isArray(node.children)) {
+      const nextPath = node.id === "0" ? folderPath : [...folderPath, node.title || "未命名文件夹"]
+      for (const child of node.children) {
+        walk(child, nextPath)
+      }
+      return
+    }
+
+    if (node.url) {
+      entries.push({
+        title: node.title || "",
+        url: node.url,
+        path: folderPath.join(" / ")
+      })
+    }
+  }
+
+  for (const root of nodes) {
+    walk(root, [])
+  }
+
+  return entries
+}
+
+function toMapByTitle(entries: BookmarkEntry[]): Map<string, BookmarkEntry[]> {
+  const map = new Map<string, BookmarkEntry[]>()
+  for (const entry of entries) {
+    const key = normalizeText(entry.title)
+    const list = map.get(key) ?? []
+    list.push(entry)
+    map.set(key, list)
+  }
+  return map
+}
+
+function toSetByUrl(entries: BookmarkEntry[]): Set<string> {
+  const urls = new Set<string>()
+  for (const entry of entries) {
+    urls.add(normalizeText(entry.url))
+  }
+  return urls
+}
+
+function dedupeEntries(entries: BookmarkEntry[]): BookmarkEntry[] {
+  const unique = new Map<string, BookmarkEntry>()
+  for (const entry of entries) {
+    const key = `${normalizeText(entry.title)}|${normalizeText(entry.url)}|${normalizeText(entry.path)}`
+    if (!unique.has(key)) {
+      unique.set(key, entry)
+    }
+  }
+  return [...unique.values()]
+}
+
+export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: BookmarkNode[]): CompareResult {
+  const aEntries = collectBookmarkEntries(aRoots)
+  const bEntries = collectBookmarkEntries(bRoots)
+
+  const aTitleMap = toMapByTitle(aEntries)
+  const bTitleMap = toMapByTitle(bEntries)
+  const aUrlSet = toSetByUrl(aEntries)
+  const bUrlSet = toSetByUrl(bEntries)
+
+  const titleKeysA = new Set(aTitleMap.keys())
+  const titleKeysB = new Set(bTitleMap.keys())
+
+  const titleOnlyA = [...titleKeysA].filter((key) => !titleKeysB.has(key))
+  const titleOnlyB = [...titleKeysB].filter((key) => !titleKeysA.has(key))
+  const titleBoth = [...titleKeysA].filter((key) => titleKeysB.has(key))
+
+  const urlOnlyA = [...aUrlSet].filter((url) => !bUrlSet.has(url))
+  const urlOnlyB = [...bUrlSet].filter((url) => !aUrlSet.has(url))
+  const urlBoth = [...aUrlSet].filter((url) => bUrlSet.has(url))
+
+  const sameTitleDifferentUrl: SameTitleDiffItem[] = []
+  for (const titleKey of titleBoth) {
+    const aUrls = new Set((aTitleMap.get(titleKey) ?? []).map((item) => normalizeText(item.url)))
+    const bUrls = new Set((bTitleMap.get(titleKey) ?? []).map((item) => normalizeText(item.url)))
+    const same = aUrls.size === bUrls.size && [...aUrls].every((url) => bUrls.has(url))
+    if (!same) {
+      const sampleTitle = (aTitleMap.get(titleKey)?.[0]?.title || bTitleMap.get(titleKey)?.[0]?.title || titleKey).trim()
+      sameTitleDifferentUrl.push({
+        title: sampleTitle || "(空标题)",
+        aUrls: [...aUrls].sort(),
+        bUrls: [...bUrls].sort()
+      })
+    }
+  }
+
+  const titleOnlyAEntries = dedupeEntries(
+    titleOnlyA.flatMap((key) =>
+      (aTitleMap.get(key) ?? []).map((entry) => ({
+        title: entry.title,
+        url: entry.url,
+        path: entry.path
+      }))
+    )
+  )
+
+  const titleOnlyBEntries = dedupeEntries(
+    titleOnlyB.flatMap((key) =>
+      (bTitleMap.get(key) ?? []).map((entry) => ({
+        title: entry.title,
+        url: entry.url,
+        path: entry.path
+      }))
+    )
+  )
+
+  const urlOnlyAEntries = dedupeEntries(
+    aEntries.filter((entry) => !bUrlSet.has(normalizeText(entry.url)))
+  )
+
+  const urlOnlyBEntries = dedupeEntries(
+    bEntries.filter((entry) => !aUrlSet.has(normalizeText(entry.url)))
+  )
+
+  return {
+    stats: {
+      aEntryCount: aEntries.length,
+      bEntryCount: bEntries.length,
+      titleOnlyACount: titleOnlyA.length,
+      titleOnlyBCount: titleOnlyB.length,
+      titleBothCount: titleBoth.length,
+      urlOnlyACount: urlOnlyA.length,
+      urlOnlyBCount: urlOnlyB.length,
+      urlBothCount: urlBoth.length,
+      sameTitleDifferentUrlCount: sameTitleDifferentUrl.length
+    },
+    titleOnlyA: titleOnlyAEntries,
+    titleOnlyB: titleOnlyBEntries,
+    urlOnlyA: urlOnlyAEntries,
+    urlOnlyB: urlOnlyBEntries,
+    sameTitleDifferentUrl
+  }
+}
