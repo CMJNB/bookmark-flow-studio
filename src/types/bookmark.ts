@@ -12,7 +12,7 @@ export type FolderTreeNode = {
   children: FolderTreeNode[]
 }
 
-export type PageKey = "select" | "export" | "import" | "compare" | "settings"
+export type PageKey = "select" | "export" | "templates" | "import" | "compare" | "settings"
 
 export type CreateBookmarkInput = {
   parentId?: string

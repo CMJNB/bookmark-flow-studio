@@ -20,15 +20,24 @@ import {
 import { formatDateForFileName } from "./lib/format"
 import { t, tf } from "./lib/i18n"
 import { normalizeImportData, parseStructuredInput } from "./lib/import-utils"
-import { buildAiPrompt, toYaml } from "./lib/prompt-utils"
-import { applyTheme, defaultSettings, loadSettings, saveSettings } from "./lib/settings"
+import { DEFAULT_PROMPT_TEMPLATE, buildAiPrompt, toYaml } from "./lib/prompt-utils"
+import {
+  applyTheme,
+  defaultPromptTemplateState,
+  defaultSettings,
+  loadPromptTemplateState,
+  loadSettings,
+  normalizePromptTemplateState,
+  savePromptTemplateState,
+  saveSettings
+} from "./lib/settings"
 import type { BookmarkNode, ExportNode, FolderTreeNode, PageKey } from "./types/bookmark"
-import type { AppLanguage, AppSettings, ThemeMode } from "./types/settings"
+import type { AppConfigSnapshot, AppLanguage, AppSettings, PromptTemplateState, ThemeMode } from "./types/settings"
 
 type CompareFilter = "all" | "title-only" | "url-only" | "title-url-conflict"
 
 async function createRecursive(parentId: string, item: ExportNode): Promise<void> {
-  const title = typeof item.title === "string" ? item.title : "未命名"
+  const title = typeof item.title === "string" ? item.title : "Untitled"
   const url = typeof item.url === "string" ? item.url.trim() : ""
 
   if (url) {
@@ -44,6 +53,14 @@ async function createRecursive(parentId: string, item: ExportNode): Promise<void
   }
 }
 
+function toThemeMode(value: unknown, fallback: ThemeMode): ThemeMode {
+  return value === "light" || value === "dark" || value === "system" ? value : fallback
+}
+
+function toLanguage(value: unknown, fallback: AppLanguage): AppLanguage {
+  return value === "zh-CN" || value === "en-US" ? value : fallback
+}
+
 function IndexPopup() {
   const [tree, setTree] = useState<BookmarkNode[]>([])
   const [activePage, setActivePage] = useState<PageKey>("select")
@@ -57,20 +74,65 @@ function IndexPopup() {
   const [slimMode, setSlimMode] = useState(true)
   const [autoBackup, setAutoBackup] = useState(true)
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [templateState, setTemplateState] = useState<PromptTemplateState>(defaultPromptTemplateState)
+  const [editingTemplateId, setEditingTemplateId] = useState(defaultPromptTemplateState.selectedTemplateId)
+  const [templateNameDraft, setTemplateNameDraft] = useState(defaultPromptTemplateState.templates[0].name)
+  const [templateContentDraft, setTemplateContentDraft] = useState(defaultPromptTemplateState.templates[0].content)
   const [status, setStatus] = useState(t(defaultSettings.language, "statusIdle"))
   const [promptText, setPromptText] = useState("")
   const [importFile, setImportFile] = useState<File | null>(null)
   const [pastedData, setPastedData] = useState("")
+  const [configImportFile, setConfigImportFile] = useState<File | null>(null)
+  const [configPastedData, setConfigPastedData] = useState("")
+  const [isStatusVisible, setIsStatusVisible] = useState(false)
+  const [copyPromptSuccess, setCopyPromptSuccess] = useState(false)
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
-  const msg = (zh: string, en: string) => (settings.language === "zh-CN" ? zh : en)
+  const activeTemplate = useMemo(() => {
+    return (
+      templateState.templates.find((item) => item.id === templateState.selectedTemplateId) ??
+      templateState.templates[0] ??
+      defaultPromptTemplateState.templates[0]
+    )
+  }, [templateState])
+
+  const editingTemplate = useMemo(() => {
+    return templateState.templates.find((item) => item.id === editingTemplateId) ?? null
+  }, [editingTemplateId, templateState.templates])
+
+  const setStatusByKey = (key: string, vars?: Record<string, string | number>): void => {
+    setStatus(vars ? tf(settings.language, key, vars) : t(settings.language, key))
+    setIsStatusVisible(true)
+  }
+
+  const openTemplateForEdit = (id: string): void => {
+    const target = templateState.templates.find((item) => item.id === id)
+    if (!target) {
+      return
+    }
+
+    setEditingTemplateId(target.id)
+    setTemplateNameDraft(target.name)
+    setTemplateContentDraft(target.content)
+  }
 
   useEffect(() => {
     ;(async () => {
       try {
         const loaded = await loadSettings()
+        const loadedTemplateState = await loadPromptTemplateState()
         setSettings(loaded)
+        setTemplateState(loadedTemplateState)
         applyTheme(loaded.theme)
         setStatus(t(loaded.language, "statusIdle"))
+
+        const firstEditTemplate =
+          loadedTemplateState.templates.find((item) => item.id === loadedTemplateState.selectedTemplateId) ??
+          loadedTemplateState.templates[0]
+        if (firstEditTemplate) {
+          setEditingTemplateId(firstEditTemplate.id)
+          setTemplateNameDraft(firstEditTemplate.name)
+          setTemplateContentDraft(firstEditTemplate.content)
+        }
 
         const data = await getTree()
         setTree(data)
@@ -78,7 +140,7 @@ function IndexPopup() {
         setFolderTree(builtTree)
         setExpandedFolderIds(builtTree.map((item) => item.id))
       } catch (error) {
-        setStatus(msg(`加载书签失败: ${(error as Error).message}`, `Failed to load bookmarks: ${(error as Error).message}`))
+        setStatusByKey("statusLoadBookmarksFailed", { error: (error as Error).message })
       }
     })()
   }, [])
@@ -93,6 +155,15 @@ function IndexPopup() {
     media.addEventListener("change", listener)
     return () => media.removeEventListener("change", listener)
   }, [settings.theme])
+
+  useEffect(() => {
+    if (!editingTemplate) {
+      return
+    }
+
+    setTemplateNameDraft(editingTemplate.name)
+    setTemplateContentDraft(editingTemplate.content)
+  }, [editingTemplate])
 
   const exportRoots = useMemo(() => {
     return buildSelectedExportRoots(tree, selectedFolderIds, allNodes)
@@ -154,90 +225,182 @@ function IndexPopup() {
     const mode = slimMode ? "slim" : "full"
     const fileName = `${backup ? "bookmarks-backup" : "bookmarks-export"}-${mode}-${stamp}.json`
     await downloadTextFile(fileName, json)
-    setStatus(msg(`导出成功: ${fileName}，共 ${roots.length} 个根项`, `Exported: ${fileName}, ${roots.length} root items`))
+    setStatusByKey("statusExportSuccess", { fileName, count: roots.length })
   }
 
   const exportAiPrompt = async (): Promise<void> => {
     const { roots } = buildExportData()
     const slim = roots.map(nodeToSlim)
     const yaml = toYaml(slim)
-    const prompt = buildAiPrompt(yaml)
+    const prompt = buildAiPrompt(yaml, activeTemplate.content)
 
     setPromptText(prompt)
-    setStatus(
-      msg(
-        `AI 提示词已生成，共 ${roots.length} 个根项。请在预览区选择复制或下载。`,
-        `AI prompt generated with ${roots.length} root items. Use copy or download in preview.`
+    setStatusByKey("statusPromptGenerated", { count: roots.length })
+  }
+
+  const persistTemplateState = async (next: PromptTemplateState, successStatus: string): Promise<void> => {
+    const normalized = normalizePromptTemplateState(next)
+    setTemplateState(normalized)
+    await savePromptTemplateState(normalized)
+    setStatus(successStatus)
+  }
+
+  const createTemplate = async (): Promise<void> => {
+    const id = `tpl-${Date.now()}`
+    const now = Date.now()
+    const newTemplate = {
+      id,
+      name: t(settings.language, "newTemplateName"),
+      content: DEFAULT_PROMPT_TEMPLATE,
+      updatedAt: now
+    }
+
+    const next = {
+      ...templateState,
+      templates: [...templateState.templates, newTemplate]
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateCreated"))
+    setEditingTemplateId(id)
+    setTemplateNameDraft(newTemplate.name)
+    setTemplateContentDraft(newTemplate.content)
+  }
+
+  const saveTemplateDraft = async (): Promise<void> => {
+    if (!editingTemplate) {
+      setStatusByKey("statusNoEditableTemplate")
+      return
+    }
+
+    const name = templateNameDraft.trim() || t(settings.language, "untitledTemplate")
+    const content = templateContentDraft.trim()
+    if (!content) {
+      setStatusByKey("statusTemplateEmpty")
+      return
+    }
+
+    const next = {
+      ...templateState,
+      templates: templateState.templates.map((item) =>
+        item.id === editingTemplate.id
+          ? {
+              ...item,
+              name,
+              content,
+              updatedAt: Date.now()
+            }
+          : item
       )
-    )
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateSaved"))
+  }
+
+  const applyEditingTemplate = async (): Promise<void> => {
+    if (!editingTemplate) {
+      setStatusByKey("statusNoTemplateToApply")
+      return
+    }
+
+    const next = {
+      ...templateState,
+      selectedTemplateId: editingTemplate.id
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateApplied"))
+  }
+
+  const deleteEditingTemplate = async (): Promise<void> => {
+    if (!editingTemplate) {
+      setStatusByKey("statusNoTemplateToDelete")
+      return
+    }
+
+    if (templateState.templates.length <= 1) {
+      setStatusByKey("statusKeepOneTemplate")
+      return
+    }
+
+    const remaining = templateState.templates.filter((item) => item.id !== editingTemplate.id)
+    const fallback = remaining[0]
+    const nextSelected =
+      templateState.selectedTemplateId === editingTemplate.id ? fallback.id : templateState.selectedTemplateId
+    const next = {
+      selectedTemplateId: nextSelected,
+      templates: remaining
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateDeleted"))
+    openTemplateForEdit(fallback.id)
+  }
+
+  const restoreDefaultTemplate = (): void => {
+    setTemplateContentDraft(DEFAULT_PROMPT_TEMPLATE)
+    setStatusByKey("statusTemplateRestoredRememberSave")
   }
 
   const downloadAiPrompt = async (): Promise<void> => {
     if (!promptText.trim()) {
-      setStatus(msg("请先生成 AI 提示词", "Please generate AI prompt first"))
+      setStatusByKey("statusGeneratePromptFirst")
       return
     }
 
     const stamp = formatDateForFileName(new Date())
     await downloadTextFile(`bookmarks-ai-prompt-${stamp}.txt`, promptText)
-    setStatus(msg("AI 提示词已下载", "AI prompt downloaded"))
+    setStatusByKey("statusPromptDownloaded")
   }
 
   const readFileText = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve(String(reader.result ?? ""))
-      reader.onerror = () => reject(new Error("文件读取失败"))
+      reader.onerror = () => reject(new Error("File read failed"))
       reader.readAsText(file, "utf-8")
     })
   }
 
   const importFromText = async (rawText: string, sourceName: string): Promise<void> => {
     if (!rawText.trim()) {
-      setStatus(msg("导入内容为空，请先上传文件或粘贴 JSON/YAML", "Import content is empty. Please upload or paste JSON/YAML"))
+      setStatusByKey("statusImportContentEmpty")
       return
     }
 
-    const confirmed = window.confirm("导入前提醒: 建议先备份当前书签。点击确定继续")
+    const confirmed = window.confirm(t(settings.language, "confirmImportWithBackup"))
     if (!confirmed) {
-      setStatus(msg("已取消导入", "Import canceled"))
+      setStatusByKey("statusImportCanceled")
       return
     }
 
     if (autoBackup) {
-      setStatus(msg("正在自动备份...", "Creating backup..."))
+      setStatusByKey("statusCreatingBackup")
       await exportJson(true)
     }
 
     try {
-      setStatus(msg("正在导入，请稍候...", "Importing, please wait..."))
+      setStatusByKey("statusImporting")
       const parsed = parseStructuredInput(rawText)
       const items = normalizeImportData(parsed)
       const currentTree = await getTree()
       const parentId = getDefaultImportParentId(currentTree)
+      const importPrefix = t(settings.language, "importFolderPrefix")
       const folder = await createBookmark({
         parentId,
-        title: `AI 整理导入 ${new Date().toLocaleString("zh-CN")}`
+        title: `${importPrefix} ${new Date().toLocaleString(settings.language)}`
       })
 
       for (const item of items) {
         await createRecursive(folder.id, item)
       }
 
-      setStatus(
-        msg(
-          `导入完成，来源: ${sourceName}，目录: ${folder.title}，顶层项目: ${items.length}`,
-          `Import completed. Source: ${sourceName}, Folder: ${folder.title}, Top-level items: ${items.length}`
-        )
-      )
+      setStatusByKey("statusImportCompleted", { source: sourceName, folder: folder.title, count: items.length })
     } catch (error) {
-      setStatus(msg(`导入失败: ${(error as Error).message}`, `Import failed: ${(error as Error).message}`))
+      setStatusByKey("statusImportFailed", { error: (error as Error).message })
     }
   }
 
   const importFromFile = async (): Promise<void> => {
     if (!importFile) {
-      setStatus(msg("请先选择文件（JSON/YAML）", "Please select a file (JSON/YAML)"))
+      setStatusByKey("statusChooseImportFile")
       return
     }
 
@@ -245,23 +408,24 @@ function IndexPopup() {
       const text = await readFileText(importFile)
       await importFromText(text, importFile.name)
     } catch (error) {
-      setStatus(msg(`读取文件失败: ${(error as Error).message}`, `Failed to read file: ${(error as Error).message}`))
+      setStatusByKey("statusReadFileFailed", { error: (error as Error).message })
     }
   }
 
   const importFromPastedData = async (): Promise<void> => {
-    await importFromText(pastedData, "粘贴内容")
+    await importFromText(pastedData, t(settings.language, "pastedContent"))
   }
 
   const copyAiPrompt = async (): Promise<void> => {
     if (!promptText.trim()) {
-      setStatus(msg("请先生成 AI 提示词", "Please generate AI prompt first"))
+      setStatusByKey("statusGeneratePromptFirst")
       return
     }
 
     try {
       await navigator.clipboard.writeText(promptText)
-      setStatus(msg("AI 提示词已复制到剪贴板", "AI prompt copied to clipboard"))
+      setStatusByKey("statusPromptCopied")
+      setCopyPromptSuccess(true)
     } catch {
       const textarea = document.createElement("textarea")
       textarea.value = promptText
@@ -271,8 +435,11 @@ function IndexPopup() {
       textarea.select()
       document.execCommand("copy")
       document.body.removeChild(textarea)
-      setStatus(msg("AI 提示词已复制到剪贴板", "AI prompt copied to clipboard"))
+      setStatusByKey("statusPromptCopied")
+      setCopyPromptSuccess(true)
     }
+
+    window.setTimeout(() => setCopyPromptSuccess(false), 1200)
   }
 
   const toggleExpanded = (id: string): void => {
@@ -289,32 +456,104 @@ function IndexPopup() {
 
   const saveSelectionAsA = (): void => {
     setCompareSetA([...new Set(selectedFolderIds)])
-    setStatus(msg("当前选择已保存为集合 A", "Current selection saved as set A"))
+    setStatusByKey("statusSelectionSavedA")
   }
 
   const saveSelectionAsB = (): void => {
     setCompareSetB([...new Set(selectedFolderIds)])
-    setStatus(msg("当前选择已保存为集合 B", "Current selection saved as set B"))
+    setStatusByKey("statusSelectionSavedB")
   }
 
   const runSelectionCompare = (): void => {
     const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
     const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
     setCompareResult(compareBookmarkSelections(rootsA, rootsB))
-    setStatus(msg("对比完成", "Comparison completed"))
+    setStatusByKey("statusCompareDone")
   }
 
   const clearCompareSets = (): void => {
     setCompareSetA([])
     setCompareSetB([])
     setCompareResult(null)
-    setStatus(msg("已清空对比集合", "Compare sets cleared"))
+    setStatusByKey("statusCompareCleared")
   }
 
   const saveAppSettings = async (): Promise<void> => {
     await saveSettings(settings)
     applyTheme(settings.theme)
     setStatus(t(settings.language, "statusSettingsSaved"))
+  }
+
+  const exportConfig = async (): Promise<void> => {
+    const snapshot: AppConfigSnapshot = {
+      version: 1,
+      settings,
+      slimMode,
+      autoBackup,
+      promptTemplates: templateState
+    }
+
+    const stamp = formatDateForFileName(new Date())
+    await downloadTextFile(`bookmark-structurer-config-${stamp}.json`, JSON.stringify(snapshot, null, 2))
+    setStatusByKey("statusConfigExported")
+  }
+
+  const importConfigFromText = async (rawText: string, sourceName: string): Promise<void> => {
+    if (!rawText.trim()) {
+      setStatusByKey("statusConfigEmpty")
+      return
+    }
+
+    try {
+      const parsed = parseStructuredInput(rawText) as Record<string, unknown>
+      const incomingSettings = (parsed.settings as Record<string, unknown> | undefined) ?? {}
+      const nextSettings: AppSettings = {
+        theme: toThemeMode(incomingSettings.theme, settings.theme),
+        language: toLanguage(incomingSettings.language, settings.language)
+      }
+      const nextSlimMode = typeof parsed.slimMode === "boolean" ? parsed.slimMode : slimMode
+      const nextAutoBackup = typeof parsed.autoBackup === "boolean" ? parsed.autoBackup : autoBackup
+      const nextTemplateState = normalizePromptTemplateState(parsed.promptTemplates)
+
+      await saveSettings(nextSettings)
+      await savePromptTemplateState(nextTemplateState)
+
+      setSettings(nextSettings)
+      setSlimMode(nextSlimMode)
+      setAutoBackup(nextAutoBackup)
+      setTemplateState(nextTemplateState)
+      applyTheme(nextSettings.theme)
+
+      const editTarget =
+        nextTemplateState.templates.find((item) => item.id === nextTemplateState.selectedTemplateId) ?? nextTemplateState.templates[0]
+      if (editTarget) {
+        setEditingTemplateId(editTarget.id)
+        setTemplateNameDraft(editTarget.name)
+        setTemplateContentDraft(editTarget.content)
+      }
+
+      setStatusByKey("statusConfigImported", { source: sourceName })
+    } catch (error) {
+      setStatusByKey("statusConfigImportFailed", { error: (error as Error).message })
+    }
+  }
+
+  const importConfigFromFile = async (): Promise<void> => {
+    if (!configImportFile) {
+      setStatusByKey("statusChooseConfigFile")
+      return
+    }
+
+    try {
+      const text = await readFileText(configImportFile)
+      await importConfigFromText(text, configImportFile.name)
+    } catch (error) {
+      setStatusByKey("statusReadConfigFileFailed", { error: (error as Error).message })
+    }
+  }
+
+  const importConfigFromPastedData = async (): Promise<void> => {
+    await importConfigFromText(configPastedData, t(settings.language, "pastedContent"))
   }
 
   const setTheme = (theme: ThemeMode): void => {
@@ -357,11 +596,12 @@ function IndexPopup() {
       <section className="card">
         <h2>{t(settings.language, "stepsTitle")}</h2>
         <div className="pager">
-          <button className={`page-btn ${activePage === "select" ? "active" : ""}`} onClick={() => setActivePage("select")}>{t(settings.language, "stepSelect")}</button>
-          <button className={`page-btn ${activePage === "export" ? "active" : ""}`} onClick={() => setActivePage("export")}>{t(settings.language, "stepExport")}</button>
-          <button className={`page-btn ${activePage === "import" ? "active" : ""}`} onClick={() => setActivePage("import")}>{t(settings.language, "stepImport")}</button>
-          <button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>{t(settings.language, "stepCompare")}</button>
-          <button className={`page-btn ${activePage === "settings" ? "active" : ""}`} onClick={() => setActivePage("settings")}>{t(settings.language, "stepSettings")}</button>
+          <button className={`page-btn ${activePage === "select" ? "active" : ""}`} onClick={() => setActivePage("select")}>1. {t(settings.language, "stepSelect")}</button>
+          <button className={`page-btn ${activePage === "templates" ? "active" : ""}`} onClick={() => setActivePage("templates")}>2. {t(settings.language, "stepTemplates")}</button>
+          <button className={`page-btn ${activePage === "export" ? "active" : ""}`} onClick={() => setActivePage("export")}>3. {t(settings.language, "stepExport")}</button>
+          <button className={`page-btn ${activePage === "import" ? "active" : ""}`} onClick={() => setActivePage("import")}>4. {t(settings.language, "stepImport")}</button>
+          <button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>5. {t(settings.language, "stepCompare")}</button>
+          <button className={`page-btn ${activePage === "settings" ? "active" : ""}`} onClick={() => setActivePage("settings")}>6. {t(settings.language, "stepSettings")}</button>
         </div>
       </section>
 
@@ -387,10 +627,60 @@ function IndexPopup() {
         </section>
       ) : null}
 
+      {activePage === "templates" ? (
+        <section className="card">
+          <h2>{t(settings.language, "templateTitle")}</h2>
+          <p className="muted">{t(settings.language, "templateHint")}</p>
+
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "templateList")}</div>
+            <div className="controls wrap">
+              {templateState.templates.map((item) => (
+                <button
+                  key={item.id}
+                  className={`page-btn ${editingTemplateId === item.id ? "active" : ""}`}
+                  onClick={() => openTemplateForEdit(item.id)}>
+                  {item.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "templateName")}</div>
+            <input
+              className="text-input"
+              value={templateNameDraft}
+              onChange={(e) => setTemplateNameDraft(e.target.value)}
+              placeholder={t(settings.language, "templateName")}
+            />
+          </div>
+
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "templateContent")}</div>
+            <textarea
+              className="paste-input template-editor"
+              placeholder={t(settings.language, "templateContentPlaceholder")}
+              value={templateContentDraft}
+              onChange={(e) => setTemplateContentDraft(e.target.value)}
+            />
+          </div>
+
+          <div className="controls wrap">
+            <button className="link-btn" onClick={() => void createTemplate()}>{t(settings.language, "newTemplate")}</button>
+            <button className="link-btn" onClick={() => void saveTemplateDraft()}>{t(settings.language, "saveTemplate")}</button>
+            <button className="link-btn" onClick={() => void applyEditingTemplate()}>{t(settings.language, "applyTemplate")}</button>
+            <button className="link-btn" onClick={() => void deleteEditingTemplate()}>{t(settings.language, "deleteTemplate")}</button>
+            <button className="link-btn" onClick={restoreDefaultTemplate}>{t(settings.language, "restoreDefaultTemplate")}</button>
+          </div>
+        </section>
+      ) : null}
+
       {activePage === "export" ? (
         <>
           <section className="card">
             <h2>{t(settings.language, "exportTitle")}</h2>
+            <p className="muted">{tf(settings.language, "activeTemplate", { name: activeTemplate.name })}</p>
             <label className="check">
               <input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
               <span>{t(settings.language, "slimMode")}</span>
@@ -402,7 +692,9 @@ function IndexPopup() {
           <section className="card">
             <h2>{t(settings.language, "promptPreview")}</h2>
             <div className="controls">
-              <button className="link-btn" onClick={() => void copyAiPrompt()}>{t(settings.language, "copyPrompt")}</button>
+              <button className={`link-btn feedback-btn ${copyPromptSuccess ? "success" : ""}`} onClick={() => void copyAiPrompt()}>
+                {copyPromptSuccess ? t(settings.language, "copied") : t(settings.language, "copyPrompt")}
+              </button>
               <button className="link-btn" onClick={() => void downloadAiPrompt()}>{t(settings.language, "downloadPrompt")}</button>
             </div>
             <pre className="prompt">{promptText || t(settings.language, "promptPlaceholder")}</pre>
@@ -439,15 +731,15 @@ function IndexPopup() {
           {compareResult ? (
             <div className="compare-panel">
               <div className="compare-stats-grid">
-                <div className="compare-stat">{msg("A条目", "A Entries")}: {compareResult.stats.aEntryCount}</div>
-                <div className="compare-stat">{msg("B条目", "B Entries")}: {compareResult.stats.bEntryCount}</div>
-                <div className="compare-stat">{msg("标题仅A", "Title Only A")}: {compareResult.stats.titleOnlyACount}</div>
-                <div className="compare-stat">{msg("标题仅B", "Title Only B")}: {compareResult.stats.titleOnlyBCount}</div>
-                <div className="compare-stat">{msg("URL仅A", "URL Only A")}: {compareResult.stats.urlOnlyACount}</div>
-                <div className="compare-stat">{msg("URL仅B", "URL Only B")}: {compareResult.stats.urlOnlyBCount}</div>
-                <div className="compare-stat">{msg("标题交集", "Title Intersection")}: {compareResult.stats.titleBothCount}</div>
-                <div className="compare-stat">{msg("URL交集", "URL Intersection")}: {compareResult.stats.urlBothCount}</div>
-                <div className="compare-stat wide">{msg("同标题不同URL", "Same Title Different URL")}: {compareResult.stats.sameTitleDifferentUrlCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatAEntries")}: {compareResult.stats.aEntryCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatBEntries")}: {compareResult.stats.bEntryCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatTitleOnlyA")}: {compareResult.stats.titleOnlyACount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatTitleOnlyB")}: {compareResult.stats.titleOnlyBCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatUrlOnlyA")}: {compareResult.stats.urlOnlyACount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatUrlOnlyB")}: {compareResult.stats.urlOnlyBCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatTitleBoth")}: {compareResult.stats.titleBothCount}</div>
+                <div className="compare-stat">{t(settings.language, "compareStatUrlBoth")}: {compareResult.stats.urlBothCount}</div>
+                <div className="compare-stat wide">{t(settings.language, "compareStatConflict")}: {compareResult.stats.sameTitleDifferentUrlCount}</div>
               </div>
 
               <div className="controls wrap compare-filter-row">
@@ -471,8 +763,8 @@ function IndexPopup() {
                         {compareResult.sameTitleDifferentUrl.map((item, index) => (
                           <li key={`${item.title}-${index}`}>
                             <div className="compare-item-title">{item.title}</div>
-                            <div className="compare-item-sub">A URLs: {item.aUrls.join(" | ")}</div>
-                            <div className="compare-item-sub">B URLs: {item.bUrls.join(" | ")}</div>
+                            <div className="compare-item-sub">{t(settings.language, "compareAUrls")}: {item.aUrls.join(" | ")}</div>
+                            <div className="compare-item-sub">{t(settings.language, "compareBUrls")}: {item.bUrls.join(" | ")}</div>
                           </li>
                         ))}
                       </ul>
@@ -509,14 +801,39 @@ function IndexPopup() {
             </div>
           </div>
 
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "settingsConfig")}</div>
+            <button className="btn ok" onClick={() => void exportConfig()}>{t(settings.language, "exportConfig")}</button>
+            <input
+              type="file"
+              accept="application/json,.json,text/yaml,.yaml,.yml"
+              onChange={(e) => setConfigImportFile(e.target.files?.[0] ?? null)}
+            />
+            <button className="btn warn" onClick={() => void importConfigFromFile()}>{t(settings.language, "importConfigFromFile")}</button>
+            <textarea
+              className="paste-input"
+              placeholder={t(settings.language, "configPastePlaceholder")}
+              value={configPastedData}
+              onChange={(e) => setConfigPastedData(e.target.value)}
+            />
+            <button className="btn warn" onClick={() => void importConfigFromPastedData()}>{t(settings.language, "importConfigFromPaste")}</button>
+          </div>
+
           <button className="btn primary" onClick={() => void saveAppSettings()}>{t(settings.language, "saveSettings")}</button>
         </section>
       ) : null}
 
-      <section className="card">
-        <h2>{t(settings.language, "statusTitle")}</h2>
-        <pre className="status">{status}</pre>
-      </section>
+      {isStatusVisible || status !== t(settings.language, "statusIdle") ? (
+        <section className="card">
+          <div className="status-header">
+            <h2>{t(settings.language, "statusTitle")}</h2>
+            <button className="link-btn" onClick={() => setIsStatusVisible((prev) => !prev)}>
+              {isStatusVisible ? t(settings.language, "statusSectionToggleHide") : t(settings.language, "statusSectionToggleShow")}
+            </button>
+          </div>
+          {isStatusVisible ? <pre className="status">{status}</pre> : null}
+        </section>
+      ) : null}
     </main>
   )
 }

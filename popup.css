@@ -225,6 +225,16 @@ body {
   font-size: 12px;
   cursor: pointer;
   padding: 0;
+  transition: color 0.2s ease, transform 0.12s ease;
+}
+
+.link-btn:active {
+  transform: translateY(1px);
+}
+
+.feedback-btn.success {
+  color: var(--ok);
+  font-weight: 600;
 }
 
 .check {
@@ -280,6 +290,16 @@ input[type="file"] {
   margin-bottom: 10px;
 }
 
+.text-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
 .status,
 .prompt {
   margin: 0;
@@ -311,6 +331,22 @@ input[type="file"] {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   background: var(--surface-soft);
   color: var(--text);
+}
+
+.template-editor {
+  min-height: 220px;
+  max-height: 420px;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-header h2 {
+  margin: 0;
 }
 
 .compare-panel {
