@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>书签结构化整理</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>书签结构化整理</h1>
+        <p>导出为 JSON，或导入 AI 整理后的结构</p>
+      </header>
+
+      <section class="card">
+        <h2>导出书签</h2>
+        <div class="row">
+          <label class="check">
+            <input id="slimMode" type="checkbox" />
+            <span>精简模式（仅保留 title / url / children）</span>
+          </label>
+        </div>
+        <button id="exportBtn" class="btn primary">一键导出 JSON</button>
+      </section>
+
+      <section class="card">
+        <h2>导入书签</h2>
+        <p class="hint">支持导入对象或数组结构；导入前可自动备份当前书签。</p>
+        <div class="row">
+          <label class="check">
+            <input id="autoBackup" type="checkbox" checked />
+            <span>导入前自动备份当前书签</span>
+          </label>
+        </div>
+        <input id="importFile" type="file" accept="application/json,.json" />
+        <button id="importBtn" class="btn warning">开始导入</button>
+      </section>
+
+      <section class="card status-card">
+        <h2>状态</h2>
+        <pre id="status" class="status">等待操作...</pre>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

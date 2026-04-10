@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "书签结构化整理助手",
+  "description": "导出书签为结构化 JSON（支持精简模式），并可导入 AI 整理后的 JSON。",
+  "version": "1.0.0",
+  "action": {
+    "default_title": "书签结构化整理",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "bookmarks",
+    "downloads"
+  ]
+}
