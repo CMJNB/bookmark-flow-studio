@@ -2,9 +2,17 @@
   --popup-width: 420px;
   --popup-height: 560px;
   --bg: #f5f7fb;
+  --bg-accent-a: #eef2ff;
+  --bg-accent-b: #ecfeff;
   --card: #ffffff;
+  --surface: #fafafa;
+  --surface-soft: #f9fafb;
   --text: #1f2937;
+  --text-strong: #111827;
   --muted: #6b7280;
+  --interactive: #334155;
+  --interactive-hover: #eef2ff;
+  --link: #0f766e;
   --border: #d1d5db;
   --primary: #1d4ed8;
   --primary-hover: #1e40af;
@@ -12,6 +20,34 @@
   --warn-hover: #92400e;
   --ok: #047857;
   --ok-hover: #065f46;
+  --stat-bg: #eef2ff;
+  --stat-border: #c7d2fe;
+  --stat-text: #1e3a8a;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --bg-accent-a: #111827;
+  --bg-accent-b: #0f172a;
+  --card: #111827;
+  --surface: #172033;
+  --surface-soft: #1f2937;
+  --text: #e5e7eb;
+  --text-strong: #f3f4f6;
+  --muted: #9ca3af;
+  --interactive: #d1d5db;
+  --interactive-hover: #1f2937;
+  --link: #5eead4;
+  --border: #374151;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --warn: #d97706;
+  --warn-hover: #b45309;
+  --ok: #059669;
+  --ok-hover: #047857;
+  --stat-bg: #1e3a8a;
+  --stat-border: #2563eb;
+  --stat-text: #dbeafe;
 }
 
 * {
@@ -33,7 +69,7 @@ body {
   height: var(--popup-height);
   min-height: var(--popup-height);
   max-height: var(--popup-height);
-  background: radial-gradient(circle at 0% 0%, #eef2ff 0%, var(--bg) 45%, #ecfeff 100%);
+  background: radial-gradient(circle at 0% 0%, var(--bg-accent-a) 0%, var(--bg) 45%, var(--bg-accent-b) 100%);
   color: var(--text);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -88,7 +124,7 @@ body {
   padding: 8px;
   display: grid;
   gap: 6px;
-  background: #fafafa;
+  background: var(--surface);
 }
 
 .folder-row {
@@ -116,13 +152,13 @@ body {
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
-  color: #374151;
+  color: var(--interactive);
   line-height: 1;
   padding: 0;
 }
 
 .tree-toggle:hover {
-  background: #eef2ff;
+  background: var(--interactive-hover);
 }
 
 .tree-label {
@@ -155,12 +191,12 @@ body {
 
 .page-btn {
   border: 1px solid var(--border);
-  background: #f8fafc;
+  background: var(--surface-soft);
   border-radius: 8px;
   padding: 8px;
   font-size: 12px;
   cursor: pointer;
-  color: #334155;
+  color: var(--interactive);
 }
 
 .page-btn.active {
@@ -170,10 +206,22 @@ body {
   font-weight: 600;
 }
 
+:root[data-theme="dark"] .page-btn {
+  background: var(--surface-soft);
+  color: var(--interactive);
+  border-color: var(--border);
+}
+
+:root[data-theme="dark"] .page-btn.active {
+  background: #1e3a8a;
+  color: #dbeafe;
+  border-color: #60a5fa;
+}
+
 .link-btn {
   border: 0;
   background: transparent;
-  color: #0f766e;
+  color: var(--link);
   font-size: 12px;
   cursor: pointer;
   padding: 0;
@@ -238,7 +286,7 @@ input[type="file"] {
   padding: 10px;
   border: 1px dashed var(--border);
   border-radius: 8px;
-  background: #f9fafb;
+  background: var(--surface-soft);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   white-space: pre-wrap;
@@ -261,14 +309,15 @@ input[type="file"] {
   padding: 8px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #f9fafb;
+  background: var(--surface-soft);
+  color: var(--text);
 }
 
 .compare-panel {
   margin-top: 10px;
   border: 1px dashed var(--border);
   border-radius: 10px;
-  background: #fbfdff;
+  background: var(--surface-soft);
   padding: 10px;
 }
 
@@ -289,12 +338,12 @@ input[type="file"] {
 }
 
 .compare-stat {
-  background: #eef2ff;
-  border: 1px solid #c7d2fe;
+  background: var(--stat-bg);
+  border: 1px solid var(--stat-border);
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 12px;
-  color: #1e3a8a;
+  color: var(--stat-text);
 }
 
 .compare-stat.wide {
@@ -312,7 +361,7 @@ input[type="file"] {
 .compare-block h3 {
   margin: 0 0 6px;
   font-size: 12px;
-  color: #334155;
+  color: var(--interactive);
 }
 
 .compare-list {
@@ -321,7 +370,7 @@ input[type="file"] {
   display: grid;
   gap: 4px;
   font-size: 12px;
-  color: #111827;
+  color: var(--text-strong);
 }
 
 .compare-item-title {
@@ -330,6 +379,16 @@ input[type="file"] {
 
 .compare-item-sub {
   font-size: 11px;
-  color: #4b5563;
+  color: var(--muted);
   word-break: break-all;
+}
+
+.settings-group {
+  margin-bottom: 12px;
+}
+
+.settings-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
 }

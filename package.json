@@ -24,7 +24,8 @@
   "manifest": {
     "permissions": [
       "bookmarks",
-      "downloads"
+      "downloads",
+      "storage"
     ]
   }
 }

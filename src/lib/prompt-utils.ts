@@ -32,9 +32,9 @@ export function buildAiPrompt(yamlData: string): string {
     "# 输入（YAML）",
     "bookmarks:",
     yamlData
-      .split("\\n")
+      .split("\n")
       .map((line) => (line ? `  ${line}` : line))
-      .join("\\n"),
+      .join("\n"),
     "",
     "# 处理要求",
     "1. 保留所有有效 URL，不要杜撰链接。",
@@ -69,5 +69,5 @@ export function buildAiPrompt(yamlData: string): string {
     "      - title: \"书签标题\"",
     "        url: \"https://example.com\"",
     "```"
-  ].join("\\n")
+  ].join("\n")
 }

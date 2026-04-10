@@ -7,516 +7,518 @@ import { compareBookmarkSelections } from "./lib/compare-utils"
 import type { CompareResult } from "./lib/compare-utils"
 import { createBookmark, downloadTextFile, getTree } from "./lib/chrome-api"
 import {
-	buildFolderTree,
-	buildSelectedExportRoots,
-	countExportContent,
-	flattenFolderTreeIds,
-	flattenNodes,
-	getDefaultImportParentId,
-	getDescendantFolderIds,
-	nodeToFull,
-	nodeToSlim
+  buildFolderTree,
+  buildSelectedExportRoots,
+  countExportContent,
+  flattenFolderTreeIds,
+  flattenNodes,
+  getDefaultImportParentId,
+  getDescendantFolderIds,
+  nodeToFull,
+  nodeToSlim
 } from "./lib/bookmark-utils"
 import { formatDateForFileName } from "./lib/format"
+import { t, tf } from "./lib/i18n"
 import { normalizeImportData, parseStructuredInput } from "./lib/import-utils"
 import { buildAiPrompt, toYaml } from "./lib/prompt-utils"
+import { applyTheme, defaultSettings, loadSettings, saveSettings } from "./lib/settings"
 import type { BookmarkNode, ExportNode, FolderTreeNode, PageKey } from "./types/bookmark"
+import type { AppLanguage, AppSettings, ThemeMode } from "./types/settings"
 
 type CompareFilter = "all" | "title-only" | "url-only" | "title-url-conflict"
 
 async function createRecursive(parentId: string, item: ExportNode): Promise<void> {
-	const title = typeof item.title === "string" ? item.title : "未命名"
-	const url = typeof item.url === "string" ? item.url.trim() : ""
+  const title = typeof item.title === "string" ? item.title : "未命名"
+  const url = typeof item.url === "string" ? item.url.trim() : ""
 
-	if (url) {
-		await createBookmark({ parentId, title, url })
-		return
-	}
+  if (url) {
+    await createBookmark({ parentId, title, url })
+    return
+  }
 
-	const folder = await createBookmark({ parentId, title })
-	if (item.children?.length) {
-		for (const child of item.children) {
-			await createRecursive(folder.id, child)
-		}
-	}
+  const folder = await createBookmark({ parentId, title })
+  if (item.children?.length) {
+    for (const child of item.children) {
+      await createRecursive(folder.id, child)
+    }
+  }
 }
 
 function IndexPopup() {
-	const [tree, setTree] = useState<BookmarkNode[]>([])
-	const [activePage, setActivePage] = useState<PageKey>("select")
-	const [folderTree, setFolderTree] = useState<FolderTreeNode[]>([])
-	const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([])
-	const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
-	const [compareSetA, setCompareSetA] = useState<string[]>([])
-	const [compareSetB, setCompareSetB] = useState<string[]>([])
-	const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
-	const [compareFilter, setCompareFilter] = useState<CompareFilter>("all")
-	const [slimMode, setSlimMode] = useState(true)
-	const [autoBackup, setAutoBackup] = useState(true)
-	const [status, setStatus] = useState("等待操作")
-	const [promptText, setPromptText] = useState("")
-	const [importFile, setImportFile] = useState<File | null>(null)
-	const [pastedData, setPastedData] = useState("")
-	const allNodes = useMemo(() => flattenNodes(tree), [tree])
+  const [tree, setTree] = useState<BookmarkNode[]>([])
+  const [activePage, setActivePage] = useState<PageKey>("select")
+  const [folderTree, setFolderTree] = useState<FolderTreeNode[]>([])
+  const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([])
+  const [selectedFolderIds, setSelectedFolderIds] = useState<string[]>([])
+  const [compareSetA, setCompareSetA] = useState<string[]>([])
+  const [compareSetB, setCompareSetB] = useState<string[]>([])
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
+  const [compareFilter, setCompareFilter] = useState<CompareFilter>("all")
+  const [slimMode, setSlimMode] = useState(true)
+  const [autoBackup, setAutoBackup] = useState(true)
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [status, setStatus] = useState(t(defaultSettings.language, "statusIdle"))
+  const [promptText, setPromptText] = useState("")
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [pastedData, setPastedData] = useState("")
+  const allNodes = useMemo(() => flattenNodes(tree), [tree])
+  const msg = (zh: string, en: string) => (settings.language === "zh-CN" ? zh : en)
 
-	useEffect(() => {
-		;(async () => {
-			try {
-				const t = await getTree()
-				setTree(t)
-				const builtTree = buildFolderTree(t)
-				setFolderTree(builtTree)
-				setExpandedFolderIds(builtTree.map((item) => item.id))
-			} catch (error) {
-				setStatus(`加载书签失败: ${(error as Error).message}`)
-			}
-		})()
-	}, [])
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const loaded = await loadSettings()
+        setSettings(loaded)
+        applyTheme(loaded.theme)
+        setStatus(t(loaded.language, "statusIdle"))
 
-	const exportRoots = useMemo(() => {
-		return buildSelectedExportRoots(tree, selectedFolderIds, allNodes)
-	}, [allNodes, selectedFolderIds, tree])
+        const data = await getTree()
+        setTree(data)
+        const builtTree = buildFolderTree(data)
+        setFolderTree(builtTree)
+        setExpandedFolderIds(builtTree.map((item) => item.id))
+      } catch (error) {
+        setStatus(msg(`加载书签失败: ${(error as Error).message}`, `Failed to load bookmarks: ${(error as Error).message}`))
+      }
+    })()
+  }, [])
 
-	const exportStats = useMemo(() => {
-		return countExportContent(exportRoots)
-	}, [exportRoots])
+  useEffect(() => {
+    if (settings.theme !== "system") {
+      return undefined
+    }
 
-	const selectedCountLabel = useMemo(() => {
-		const base = selectedFolderIds.length === 0 ? "未选择（默认导出全部）" : `已选择 ${selectedFolderIds.length} 个文件夹`
-		return `${base}；预计导出 ${exportStats.folders} 个文件夹、${exportStats.links} 条链接`
-	}, [exportStats.folders, exportStats.links, selectedFolderIds.length])
+    const media = window.matchMedia("(prefers-color-scheme: dark)")
+    const listener = () => applyTheme("system")
+    media.addEventListener("change", listener)
+    return () => media.removeEventListener("change", listener)
+  }, [settings.theme])
 
-	const toggleFolder = (id: string): void => {
-		setSelectedFolderIds((prev) => {
-			const next = new Set(prev)
-			const cascadeIds = [id, ...getDescendantFolderIds(id, allNodes)]
+  const exportRoots = useMemo(() => {
+    return buildSelectedExportRoots(tree, selectedFolderIds, allNodes)
+  }, [allNodes, selectedFolderIds, tree])
 
-			if (next.has(id)) {
-				for (const targetId of cascadeIds) {
-					next.delete(targetId)
-				}
-			} else {
-				for (const targetId of cascadeIds) {
-					next.add(targetId)
-				}
-			}
+  const exportStats = useMemo(() => {
+    return countExportContent(exportRoots)
+  }, [exportRoots])
 
-			return [...next]
-		})
-	}
+  const selectedCountLabel = useMemo(() => {
+    const base =
+      selectedFolderIds.length === 0
+        ? t(settings.language, "selectNoneExportAll")
+        : tf(settings.language, "selectedFolderCount", { count: selectedFolderIds.length })
 
-	const selectAllFolders = (): void => {
-		setSelectedFolderIds(flattenFolderTreeIds(folderTree))
-	}
+    return `${base}; ${tf(settings.language, "exportEstimate", {
+      folders: exportStats.folders,
+      links: exportStats.links
+    })}`
+  }, [exportStats.folders, exportStats.links, selectedFolderIds.length, settings.language])
 
-	const clearFolderSelection = (): void => {
-		setSelectedFolderIds([])
-	}
+  const toggleFolder = (id: string): void => {
+    setSelectedFolderIds((prev) => {
+      const next = new Set(prev)
+      const cascadeIds = [id, ...getDescendantFolderIds(id, allNodes)]
 
-	const buildExportData = (): { roots: BookmarkNode[]; output: unknown[] } => {
-		const roots = exportRoots
-		const output = slimMode ? roots.map(nodeToSlim) : roots.map(nodeToFull)
-		return { roots, output }
-	}
+      if (next.has(id)) {
+        for (const targetId of cascadeIds) {
+          next.delete(targetId)
+        }
+      } else {
+        for (const targetId of cascadeIds) {
+          next.add(targetId)
+        }
+      }
 
-	const exportJson = async (backup = false): Promise<void> => {
-		const { roots, output } = buildExportData()
-		const json = JSON.stringify(output, null, 2)
-		const stamp = formatDateForFileName(new Date())
-		const mode = slimMode ? "slim" : "full"
-		const fileName = `${backup ? "bookmarks-backup" : "bookmarks-export"}-${mode}-${stamp}.json`
-		await downloadTextFile(fileName, json)
-		setStatus(`导出成功: ${fileName}，共 ${roots.length} 个根项`)
-	}
+      return [...next]
+    })
+  }
 
-	const exportAiPrompt = async (): Promise<void> => {
-		const { roots } = buildExportData()
-		const slim = roots.map(nodeToSlim)
-		const yaml = toYaml(slim)
-		const prompt = buildAiPrompt(yaml)
+  const selectAllFolders = (): void => {
+    setSelectedFolderIds(flattenFolderTreeIds(folderTree))
+  }
 
-		setPromptText(prompt)
-		setStatus(`AI 提示词已生成，共 ${roots.length} 个根项。请在预览区选择复制或下载。`)
-	}
+  const clearFolderSelection = (): void => {
+    setSelectedFolderIds([])
+  }
 
-	const downloadAiPrompt = async (): Promise<void> => {
-		if (!promptText.trim()) {
-			setStatus("请先生成 AI 提示词")
-			return
-		}
+  const buildExportData = (): { roots: BookmarkNode[]; output: unknown[] } => {
+    const roots = exportRoots
+    const output = slimMode ? roots.map(nodeToSlim) : roots.map(nodeToFull)
+    return { roots, output }
+  }
 
-		const stamp = formatDateForFileName(new Date())
-		await downloadTextFile(`bookmarks-ai-prompt-${stamp}.txt`, promptText)
-		setStatus("AI 提示词已下载")
-	}
+  const exportJson = async (backup = false): Promise<void> => {
+    const { roots, output } = buildExportData()
+    const json = JSON.stringify(output, null, 2)
+    const stamp = formatDateForFileName(new Date())
+    const mode = slimMode ? "slim" : "full"
+    const fileName = `${backup ? "bookmarks-backup" : "bookmarks-export"}-${mode}-${stamp}.json`
+    await downloadTextFile(fileName, json)
+    setStatus(msg(`导出成功: ${fileName}，共 ${roots.length} 个根项`, `Exported: ${fileName}, ${roots.length} root items`))
+  }
 
-	const readFileText = (file: File): Promise<string> => {
-		return new Promise((resolve, reject) => {
-			const reader = new FileReader()
-			reader.onload = () => resolve(String(reader.result ?? ""))
-			reader.onerror = () => reject(new Error("文件读取失败"))
-			reader.readAsText(file, "utf-8")
-		})
-	}
+  const exportAiPrompt = async (): Promise<void> => {
+    const { roots } = buildExportData()
+    const slim = roots.map(nodeToSlim)
+    const yaml = toYaml(slim)
+    const prompt = buildAiPrompt(yaml)
 
-	const importFromText = async (rawText: string, sourceName: string): Promise<void> => {
-		if (!rawText.trim()) {
-			setStatus("导入内容为空，请先上传文件或粘贴 JSON/YAML")
-			return
-		}
+    setPromptText(prompt)
+    setStatus(
+      msg(
+        `AI 提示词已生成，共 ${roots.length} 个根项。请在预览区选择复制或下载。`,
+        `AI prompt generated with ${roots.length} root items. Use copy or download in preview.`
+      )
+    )
+  }
 
-		const confirmed = window.confirm("导入前提醒: 建议先备份当前书签。点击确定继续")
-		if (!confirmed) {
-			setStatus("已取消导入")
-			return
-		}
+  const downloadAiPrompt = async (): Promise<void> => {
+    if (!promptText.trim()) {
+      setStatus(msg("请先生成 AI 提示词", "Please generate AI prompt first"))
+      return
+    }
 
-		if (autoBackup) {
-			setStatus("正在自动备份...")
-			await exportJson(true)
-		}
+    const stamp = formatDateForFileName(new Date())
+    await downloadTextFile(`bookmarks-ai-prompt-${stamp}.txt`, promptText)
+    setStatus(msg("AI 提示词已下载", "AI prompt downloaded"))
+  }
 
-		try {
-			setStatus("正在导入，请稍候...")
-			const parsed = parseStructuredInput(rawText)
-			const items = normalizeImportData(parsed)
-			const currentTree = await getTree()
-			const parentId = getDefaultImportParentId(currentTree)
-			const folder = await createBookmark({
-				parentId,
-				title: `AI 整理导入 ${new Date().toLocaleString("zh-CN")}`
-			})
+  const readFileText = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ""))
+      reader.onerror = () => reject(new Error("文件读取失败"))
+      reader.readAsText(file, "utf-8")
+    })
+  }
 
-			for (const item of items) {
-				await createRecursive(folder.id, item)
-			}
+  const importFromText = async (rawText: string, sourceName: string): Promise<void> => {
+    if (!rawText.trim()) {
+      setStatus(msg("导入内容为空，请先上传文件或粘贴 JSON/YAML", "Import content is empty. Please upload or paste JSON/YAML"))
+      return
+    }
 
-			setStatus(`导入完成，来源: ${sourceName}，目录: ${folder.title}，顶层项目: ${items.length}`)
-		} catch (error) {
-			setStatus(`导入失败: ${(error as Error).message}`)
-		}
-	}
+    const confirmed = window.confirm("导入前提醒: 建议先备份当前书签。点击确定继续")
+    if (!confirmed) {
+      setStatus(msg("已取消导入", "Import canceled"))
+      return
+    }
 
-	const importFromFile = async (): Promise<void> => {
-		if (!importFile) {
-			setStatus("请先选择文件（JSON/YAML）")
-			return
-		}
+    if (autoBackup) {
+      setStatus(msg("正在自动备份...", "Creating backup..."))
+      await exportJson(true)
+    }
 
-		try {
-			const text = await readFileText(importFile)
-			await importFromText(text, importFile.name)
-		} catch (error) {
-			setStatus(`读取文件失败: ${(error as Error).message}`)
-		}
-	}
+    try {
+      setStatus(msg("正在导入，请稍候...", "Importing, please wait..."))
+      const parsed = parseStructuredInput(rawText)
+      const items = normalizeImportData(parsed)
+      const currentTree = await getTree()
+      const parentId = getDefaultImportParentId(currentTree)
+      const folder = await createBookmark({
+        parentId,
+        title: `AI 整理导入 ${new Date().toLocaleString("zh-CN")}`
+      })
 
-	const importFromPastedData = async (): Promise<void> => {
-		await importFromText(pastedData, "粘贴内容")
-	}
+      for (const item of items) {
+        await createRecursive(folder.id, item)
+      }
 
-	const copyAiPrompt = async (): Promise<void> => {
-		if (!promptText.trim()) {
-			setStatus("请先生成 AI 提示词")
-			return
-		}
+      setStatus(
+        msg(
+          `导入完成，来源: ${sourceName}，目录: ${folder.title}，顶层项目: ${items.length}`,
+          `Import completed. Source: ${sourceName}, Folder: ${folder.title}, Top-level items: ${items.length}`
+        )
+      )
+    } catch (error) {
+      setStatus(msg(`导入失败: ${(error as Error).message}`, `Import failed: ${(error as Error).message}`))
+    }
+  }
 
-		try {
-			await navigator.clipboard.writeText(promptText)
-			setStatus("AI 提示词已复制到剪贴板")
-		} catch {
-			const textarea = document.createElement("textarea")
-			textarea.value = promptText
-			textarea.style.position = "fixed"
-			textarea.style.opacity = "0"
-			document.body.appendChild(textarea)
-			textarea.select()
-			document.execCommand("copy")
-			document.body.removeChild(textarea)
-			setStatus("AI 提示词已复制到剪贴板")
-		}
-	}
+  const importFromFile = async (): Promise<void> => {
+    if (!importFile) {
+      setStatus(msg("请先选择文件（JSON/YAML）", "Please select a file (JSON/YAML)"))
+      return
+    }
 
-	const toggleExpanded = (id: string): void => {
-		setExpandedFolderIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
-	}
+    try {
+      const text = await readFileText(importFile)
+      await importFromText(text, importFile.name)
+    } catch (error) {
+      setStatus(msg(`读取文件失败: ${(error as Error).message}`, `Failed to read file: ${(error as Error).message}`))
+    }
+  }
 
-	const expandAllFolders = (): void => {
-		setExpandedFolderIds(flattenFolderTreeIds(folderTree))
-	}
+  const importFromPastedData = async (): Promise<void> => {
+    await importFromText(pastedData, "粘贴内容")
+  }
 
-	const collapseAllFolders = (): void => {
-		setExpandedFolderIds([])
-	}
+  const copyAiPrompt = async (): Promise<void> => {
+    if (!promptText.trim()) {
+      setStatus(msg("请先生成 AI 提示词", "Please generate AI prompt first"))
+      return
+    }
 
-	const saveSelectionAsA = (): void => {
-		setCompareSetA([...new Set(selectedFolderIds)])
-		setStatus("当前选择已保存为集合 A")
-	}
+    try {
+      await navigator.clipboard.writeText(promptText)
+      setStatus(msg("AI 提示词已复制到剪贴板", "AI prompt copied to clipboard"))
+    } catch {
+      const textarea = document.createElement("textarea")
+      textarea.value = promptText
+      textarea.style.position = "fixed"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand("copy")
+      document.body.removeChild(textarea)
+      setStatus(msg("AI 提示词已复制到剪贴板", "AI prompt copied to clipboard"))
+    }
+  }
 
-	const saveSelectionAsB = (): void => {
-		setCompareSetB([...new Set(selectedFolderIds)])
-		setStatus("当前选择已保存为集合 B")
-	}
+  const toggleExpanded = (id: string): void => {
+    setExpandedFolderIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+  }
 
-	const runSelectionCompare = (): void => {
-		const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
-		const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
-		setCompareResult(compareBookmarkSelections(rootsA, rootsB))
-		setStatus("对比完成")
-	}
+  const expandAllFolders = (): void => {
+    setExpandedFolderIds(flattenFolderTreeIds(folderTree))
+  }
 
-	const clearCompareSets = (): void => {
-		setCompareSetA([])
-		setCompareSetB([])
-		setCompareResult(null)
-		setStatus("已清空对比集合")
-	}
+  const collapseAllFolders = (): void => {
+    setExpandedFolderIds([])
+  }
 
-	const renderEntryList = (title: string, items: Array<{ title: string; url: string; path: string }>): JSX.Element => {
-		return (
-			<div className="compare-block">
-				<h3>{title}</h3>
-				{items.length ? (
-					<ul className="compare-list">
-						{items.map((item, index) => (
-							<li key={`${title}-${item.title}-${item.url}-${item.path}-${index}`}>
-								<div className="compare-item-title">{item.title || "(空标题)"}</div>
-								<div className="compare-item-sub">URL: {item.url}</div>
-								<div className="compare-item-sub">来源路径: {item.path || "(根目录)"}</div>
-							</li>
-						))}
-					</ul>
-				) : (
-					<p className="muted">无</p>
-				)}
-			</div>
-		)
-	}
+  const saveSelectionAsA = (): void => {
+    setCompareSetA([...new Set(selectedFolderIds)])
+    setStatus(msg("当前选择已保存为集合 A", "Current selection saved as set A"))
+  }
 
-	return (
-		<main className="app">
-			<header className="header">
-				<h1>书签结构化整理（Plasmo）</h1>
-				<p>支持选中文件夹导出，并生成带 YAML 数据的 AI 分类提示词</p>
-			</header>
+  const saveSelectionAsB = (): void => {
+    setCompareSetB([...new Set(selectedFolderIds)])
+    setStatus(msg("当前选择已保存为集合 B", "Current selection saved as set B"))
+  }
 
-			<section className="card">
-				<h2>操作步骤</h2>
-				<div className="pager">
-					<button className={`page-btn ${activePage === "select" ? "active" : ""}`} onClick={() => setActivePage("select")}>
-						1. 选择范围
-					</button>
-					<button className={`page-btn ${activePage === "export" ? "active" : ""}`} onClick={() => setActivePage("export")}>
-						2. 导出与提示词
-					</button>
-					<button className={`page-btn ${activePage === "import" ? "active" : ""}`} onClick={() => setActivePage("import")}>
-						3. 导入
-					</button>
-					<button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>
-						4. 选择对比
-					</button>
-				</div>
-			</section>
+  const runSelectionCompare = (): void => {
+    const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
+    const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
+    setCompareResult(compareBookmarkSelections(rootsA, rootsB))
+    setStatus(msg("对比完成", "Comparison completed"))
+  }
 
-			{activePage === "select" ? (
-				<section className="card">
-					<h2>选择导出范围</h2>
-					<p className="muted">{selectedCountLabel}</p>
-					<div className="folder-list">
-						<FolderTreeView
-							nodes={folderTree}
-							expandedFolderIds={expandedFolderIds}
-							selectedFolderIds={selectedFolderIds}
-							onToggleExpanded={toggleExpanded}
-							onToggleSelected={toggleFolder}
-						/>
-					</div>
-					<div className="controls">
-						<button className="link-btn" onClick={selectAllFolders}>
-							全选
-						</button>
-						<button className="link-btn" onClick={clearFolderSelection}>
-							清空
-						</button>
-						<button className="link-btn" onClick={expandAllFolders}>
-							全部展开
-						</button>
-						<button className="link-btn" onClick={collapseAllFolders}>
-							全部收起
-						</button>
-					</div>
-				</section>
-			) : null}
+  const clearCompareSets = (): void => {
+    setCompareSetA([])
+    setCompareSetB([])
+    setCompareResult(null)
+    setStatus(msg("已清空对比集合", "Compare sets cleared"))
+  }
 
-			{activePage === "export" ? (
-				<>
-					<section className="card">
-						<h2>导出与提示词</h2>
-						<label className="check">
-							<input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
-							<span>精简模式（仅 title/url/children）</span>
-						</label>
-						<button className="btn primary" onClick={() => void exportJson(false)}>
-							导出 JSON
-						</button>
-						<button className="btn ok" onClick={() => void exportAiPrompt()}>
-							生成 AI 分类提示词（含 YAML 数据）
-						</button>
-					</section>
+  const saveAppSettings = async (): Promise<void> => {
+    await saveSettings(settings)
+    applyTheme(settings.theme)
+    setStatus(t(settings.language, "statusSettingsSaved"))
+  }
 
-					<section className="card">
-						<h2>AI 提示词预览</h2>
-						<div className="controls">
-							<button className="link-btn" onClick={() => void copyAiPrompt()}>
-								一键复制提示词
-							</button>
-							<button className="link-btn" onClick={() => void downloadAiPrompt()}>
-								下载提示词
-							</button>
-						</div>
-						<pre className="prompt">{promptText || "生成后会显示在这里"}</pre>
-					</section>
-				</>
-			) : null}
+  const setTheme = (theme: ThemeMode): void => {
+    setSettings((prev) => ({ ...prev, theme }))
+    applyTheme(theme)
+  }
 
-			{activePage === "import" ? (
-				<section className="card">
-					<h2>导入</h2>
-					<label className="check">
-						<input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)} />
-						<span>导入前自动备份当前书签</span>
-					</label>
-					<input
-						type="file"
-						accept="application/json,.json,text/yaml,.yaml,.yml"
-						onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-					/>
-					<button className="btn warn" onClick={() => void importFromFile()}>
-						从文件导入（JSON/YAML）
-					</button>
-					<textarea
-						className="paste-input"
-						placeholder="也可以直接粘贴 JSON 或 YAML 到这里再导入"
-						value={pastedData}
-						onChange={(e) => setPastedData(e.target.value)}
-					/>
-					<button className="btn warn" onClick={() => void importFromPastedData()}>
-						从粘贴内容导入
-					</button>
-				</section>
-			) : null}
+  const setLanguage = (language: AppLanguage): void => {
+    setSettings((prev) => ({ ...prev, language }))
+  }
 
-			{activePage === "compare" ? (
-				<section className="card">
-					<h2>选择集对比</h2>
-					<p className="muted">先在“选择范围”页调整勾选，再保存到集合 A / B 进行对比。</p>
-					<p className="muted">当前集合 A: {compareSetA.length}，集合 B: {compareSetB.length}</p>
-					<div className="controls wrap">
-						<button className="link-btn" onClick={saveSelectionAsA}>
-							将当前选择保存为 A
-						</button>
-						<button className="link-btn" onClick={saveSelectionAsB}>
-							将当前选择保存为 B
-						</button>
-						<button className="link-btn" onClick={runSelectionCompare}>
-							执行 A/B 对比
-						</button>
-						<button className="link-btn" onClick={clearCompareSets}>
-							清空对比集合
-						</button>
-					</div>
+  const renderEntryList = (title: string, items: Array<{ title: string; url: string; path: string }>): JSX.Element => {
+    return (
+      <div className="compare-block">
+        <h3>{title}</h3>
+        {items.length ? (
+          <ul className="compare-list">
+            {items.map((item, index) => (
+              <li key={`${title}-${item.title}-${item.url}-${item.path}-${index}`}>
+                <div className="compare-item-title">{item.title || t(settings.language, "emptyTitle")}</div>
+                <div className="compare-item-sub">URL: {item.url}</div>
+                <div className="compare-item-sub">{t(settings.language, "sourcePath")}: {item.path || t(settings.language, "rootPath")}</div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="muted">{t(settings.language, "none")}</p>
+        )}
+      </div>
+    )
+  }
 
-					{compareResult ? (
-						<div className="compare-panel">
-							<div className="compare-stats-grid">
-								<div className="compare-stat">A条目: {compareResult.stats.aEntryCount}</div>
-								<div className="compare-stat">B条目: {compareResult.stats.bEntryCount}</div>
-								<div className="compare-stat">标题仅A: {compareResult.stats.titleOnlyACount}</div>
-								<div className="compare-stat">标题仅B: {compareResult.stats.titleOnlyBCount}</div>
-								<div className="compare-stat">URL仅A: {compareResult.stats.urlOnlyACount}</div>
-								<div className="compare-stat">URL仅B: {compareResult.stats.urlOnlyBCount}</div>
-								<div className="compare-stat">标题交集: {compareResult.stats.titleBothCount}</div>
-								<div className="compare-stat">URL交集: {compareResult.stats.urlBothCount}</div>
-								<div className="compare-stat wide">同标题不同URL: {compareResult.stats.sameTitleDifferentUrlCount}</div>
-							</div>
+  return (
+    <main className="app">
+      <header className="header">
+        <h1>{t(settings.language, "appTitle")}</h1>
+        <p>{t(settings.language, "appSubtitle")}</p>
+      </header>
 
-							<div className="controls wrap compare-filter-row">
-								<button
-									className={`page-btn ${compareFilter === "all" ? "active" : ""}`}
-									onClick={() => setCompareFilter("all")}
-								>
-									全部
-								</button>
-								<button
-									className={`page-btn ${compareFilter === "title-only" ? "active" : ""}`}
-									onClick={() => setCompareFilter("title-only")}
-								>
-									标题差异
-								</button>
-								<button
-									className={`page-btn ${compareFilter === "url-only" ? "active" : ""}`}
-									onClick={() => setCompareFilter("url-only")}
-								>
-									URL差异
-								</button>
-								<button
-									className={`page-btn ${compareFilter === "title-url-conflict" ? "active" : ""}`}
-									onClick={() => setCompareFilter("title-url-conflict")}
-								>
-									同标题不同URL
-								</button>
-							</div>
+      <section className="card">
+        <h2>{t(settings.language, "stepsTitle")}</h2>
+        <div className="pager">
+          <button className={`page-btn ${activePage === "select" ? "active" : ""}`} onClick={() => setActivePage("select")}>{t(settings.language, "stepSelect")}</button>
+          <button className={`page-btn ${activePage === "export" ? "active" : ""}`} onClick={() => setActivePage("export")}>{t(settings.language, "stepExport")}</button>
+          <button className={`page-btn ${activePage === "import" ? "active" : ""}`} onClick={() => setActivePage("import")}>{t(settings.language, "stepImport")}</button>
+          <button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>{t(settings.language, "stepCompare")}</button>
+          <button className={`page-btn ${activePage === "settings" ? "active" : ""}`} onClick={() => setActivePage("settings")}>{t(settings.language, "stepSettings")}</button>
+        </div>
+      </section>
 
-							<div className="compare-result-scroll">
-								{compareFilter === "all" || compareFilter === "title-only"
-									? renderEntryList("标题仅A（全部）", compareResult.titleOnlyA)
-									: null}
+      {activePage === "select" ? (
+        <section className="card">
+          <h2>{t(settings.language, "scopeTitle")}</h2>
+          <p className="muted">{selectedCountLabel}</p>
+          <div className="folder-list">
+            <FolderTreeView
+              nodes={folderTree}
+              expandedFolderIds={expandedFolderIds}
+              selectedFolderIds={selectedFolderIds}
+              onToggleExpanded={toggleExpanded}
+              onToggleSelected={toggleFolder}
+            />
+          </div>
+          <div className="controls">
+            <button className="link-btn" onClick={selectAllFolders}>{t(settings.language, "selectAll")}</button>
+            <button className="link-btn" onClick={clearFolderSelection}>{t(settings.language, "clear")}</button>
+            <button className="link-btn" onClick={expandAllFolders}>{t(settings.language, "expandAll")}</button>
+            <button className="link-btn" onClick={collapseAllFolders}>{t(settings.language, "collapseAll")}</button>
+          </div>
+        </section>
+      ) : null}
 
-								{compareFilter === "all" || compareFilter === "title-only"
-									? renderEntryList("标题仅B（全部）", compareResult.titleOnlyB)
-									: null}
+      {activePage === "export" ? (
+        <>
+          <section className="card">
+            <h2>{t(settings.language, "exportTitle")}</h2>
+            <label className="check">
+              <input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
+              <span>{t(settings.language, "slimMode")}</span>
+            </label>
+            <button className="btn primary" onClick={() => void exportJson(false)}>{t(settings.language, "exportJson")}</button>
+            <button className="btn ok" onClick={() => void exportAiPrompt()}>{t(settings.language, "generatePrompt")}</button>
+          </section>
 
-								{compareFilter === "all" || compareFilter === "url-only"
-									? renderEntryList("URL仅A（全部）", compareResult.urlOnlyA)
-									: null}
+          <section className="card">
+            <h2>{t(settings.language, "promptPreview")}</h2>
+            <div className="controls">
+              <button className="link-btn" onClick={() => void copyAiPrompt()}>{t(settings.language, "copyPrompt")}</button>
+              <button className="link-btn" onClick={() => void downloadAiPrompt()}>{t(settings.language, "downloadPrompt")}</button>
+            </div>
+            <pre className="prompt">{promptText || t(settings.language, "promptPlaceholder")}</pre>
+          </section>
+        </>
+      ) : null}
 
-								{compareFilter === "all" || compareFilter === "url-only"
-									? renderEntryList("URL仅B（全部）", compareResult.urlOnlyB)
-									: null}
+      {activePage === "import" ? (
+        <section className="card">
+          <h2>{t(settings.language, "importTitle")}</h2>
+          <label className="check">
+            <input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)} />
+            <span>{t(settings.language, "autoBackup")}</span>
+          </label>
+          <input type="file" accept="application/json,.json,text/yaml,.yaml,.yml" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} />
+          <button className="btn warn" onClick={() => void importFromFile()}>{t(settings.language, "importFromFile")}</button>
+          <textarea className="paste-input" placeholder={t(settings.language, "pastePlaceholder")} value={pastedData} onChange={(e) => setPastedData(e.target.value)} />
+          <button className="btn warn" onClick={() => void importFromPastedData()}>{t(settings.language, "importFromPaste")}</button>
+        </section>
+      ) : null}
 
-								{compareFilter === "all" || compareFilter === "title-url-conflict" ? (
-									<div className="compare-block">
-										<h3>同标题不同URL（全部）</h3>
-										{compareResult.sameTitleDifferentUrl.length ? (
-											<ul className="compare-list">
-												{compareResult.sameTitleDifferentUrl.map((item, index) => (
-													<li key={`${item.title}-${index}`}>
-														<div className="compare-item-title">{item.title}</div>
-														<div className="compare-item-sub">A URLs: {item.aUrls.join(" | ")}</div>
-														<div className="compare-item-sub">B URLs: {item.bUrls.join(" | ")}</div>
-													</li>
-												))}
-											</ul>
-										) : (
-											<p className="muted">无</p>
-										)}
-									</div>
-								) : null}
-							</div>
-						</div>
-					) : (
-						<pre className="status">尚未执行对比</pre>
-					)}
-				</section>
-			) : null}
+      {activePage === "compare" ? (
+        <section className="card">
+          <h2>{t(settings.language, "compareTitle")}</h2>
+          <p className="muted">{t(settings.language, "compareHint")}</p>
+          <p className="muted">{tf(settings.language, "compareSetCount", { a: compareSetA.length, b: compareSetB.length })}</p>
+          <div className="controls wrap">
+            <button className="link-btn" onClick={saveSelectionAsA}>{t(settings.language, "saveAsA")}</button>
+            <button className="link-btn" onClick={saveSelectionAsB}>{t(settings.language, "saveAsB")}</button>
+            <button className="link-btn" onClick={runSelectionCompare}>{t(settings.language, "runCompare")}</button>
+            <button className="link-btn" onClick={clearCompareSets}>{t(settings.language, "clearCompare")}</button>
+          </div>
 
-			<section className="card">
-				<h2>状态</h2>
-				<pre className="status">{status}</pre>
-			</section>
-		</main>
-	)
+          {compareResult ? (
+            <div className="compare-panel">
+              <div className="compare-stats-grid">
+                <div className="compare-stat">{msg("A条目", "A Entries")}: {compareResult.stats.aEntryCount}</div>
+                <div className="compare-stat">{msg("B条目", "B Entries")}: {compareResult.stats.bEntryCount}</div>
+                <div className="compare-stat">{msg("标题仅A", "Title Only A")}: {compareResult.stats.titleOnlyACount}</div>
+                <div className="compare-stat">{msg("标题仅B", "Title Only B")}: {compareResult.stats.titleOnlyBCount}</div>
+                <div className="compare-stat">{msg("URL仅A", "URL Only A")}: {compareResult.stats.urlOnlyACount}</div>
+                <div className="compare-stat">{msg("URL仅B", "URL Only B")}: {compareResult.stats.urlOnlyBCount}</div>
+                <div className="compare-stat">{msg("标题交集", "Title Intersection")}: {compareResult.stats.titleBothCount}</div>
+                <div className="compare-stat">{msg("URL交集", "URL Intersection")}: {compareResult.stats.urlBothCount}</div>
+                <div className="compare-stat wide">{msg("同标题不同URL", "Same Title Different URL")}: {compareResult.stats.sameTitleDifferentUrlCount}</div>
+              </div>
+
+              <div className="controls wrap compare-filter-row">
+                <button className={`page-btn ${compareFilter === "all" ? "active" : ""}`} onClick={() => setCompareFilter("all")}>{t(settings.language, "compareFilterAll")}</button>
+                <button className={`page-btn ${compareFilter === "title-only" ? "active" : ""}`} onClick={() => setCompareFilter("title-only")}>{t(settings.language, "compareFilterTitle")}</button>
+                <button className={`page-btn ${compareFilter === "url-only" ? "active" : ""}`} onClick={() => setCompareFilter("url-only")}>{t(settings.language, "compareFilterUrl")}</button>
+                <button className={`page-btn ${compareFilter === "title-url-conflict" ? "active" : ""}`} onClick={() => setCompareFilter("title-url-conflict")}>{t(settings.language, "compareFilterConflict")}</button>
+              </div>
+
+              <div className="compare-result-scroll">
+                {compareFilter === "all" || compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyAAll"), compareResult.titleOnlyA) : null}
+                {compareFilter === "all" || compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyBAll"), compareResult.titleOnlyB) : null}
+                {compareFilter === "all" || compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyAAll"), compareResult.urlOnlyA) : null}
+                {compareFilter === "all" || compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyBAll"), compareResult.urlOnlyB) : null}
+
+                {compareFilter === "all" || compareFilter === "title-url-conflict" ? (
+                  <div className="compare-block">
+                    <h3>{t(settings.language, "conflictAll")}</h3>
+                    {compareResult.sameTitleDifferentUrl.length ? (
+                      <ul className="compare-list">
+                        {compareResult.sameTitleDifferentUrl.map((item, index) => (
+                          <li key={`${item.title}-${index}`}>
+                            <div className="compare-item-title">{item.title}</div>
+                            <div className="compare-item-sub">A URLs: {item.aUrls.join(" | ")}</div>
+                            <div className="compare-item-sub">B URLs: {item.bUrls.join(" | ")}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted">{t(settings.language, "none")}</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <pre className="status">{t(settings.language, "noCompare")}</pre>
+          )}
+        </section>
+      ) : null}
+
+      {activePage === "settings" ? (
+        <section className="card">
+          <h2>{t(settings.language, "settingsTitle")}</h2>
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "settingsTheme")}</div>
+            <div className="controls wrap">
+              <button className={`page-btn ${settings.theme === "light" ? "active" : ""}`} onClick={() => setTheme("light")}>{t(settings.language, "themeLight")}</button>
+              <button className={`page-btn ${settings.theme === "dark" ? "active" : ""}`} onClick={() => setTheme("dark")}>{t(settings.language, "themeDark")}</button>
+              <button className={`page-btn ${settings.theme === "system" ? "active" : ""}`} onClick={() => setTheme("system")}>{t(settings.language, "themeSystem")}</button>
+            </div>
+          </div>
+
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "settingsLanguage")}</div>
+            <div className="controls wrap">
+              <button className={`page-btn ${settings.language === "zh-CN" ? "active" : ""}`} onClick={() => setLanguage("zh-CN")}>{t(settings.language, "langZh")}</button>
+              <button className={`page-btn ${settings.language === "en-US" ? "active" : ""}`} onClick={() => setLanguage("en-US")}>{t(settings.language, "langEn")}</button>
+            </div>
+          </div>
+
+          <button className="btn primary" onClick={() => void saveAppSettings()}>{t(settings.language, "saveSettings")}</button>
+        </section>
+      ) : null}
+
+      <section className="card">
+        <h2>{t(settings.language, "statusTitle")}</h2>
+        <pre className="status">{status}</pre>
+      </section>
+    </main>
+  )
 }
 
 export default IndexPopup
