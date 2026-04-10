@@ -119,13 +119,13 @@ function CompareSearchPage() {
       </section>
 
       <OptionSelector
-        label={t(settings.language, "floatingCompareSortLabel") || "排序方式"}
+        label={t(settings.language, "floatingCompareSortLabel")}
         options={[
-          { value: "original", label: t(settings.language, "floatingCompareSortOriginal") || "原始", title: "原始顺序" },
-          { value: "title-asc", label: t(settings.language, "floatingCompareSortTitleAsc") || "标题 ↑", title: "按标题 A-Z" },
-          { value: "title-desc", label: t(settings.language, "floatingCompareSortTitleDesc") || "标题 ↓", title: "按标题 Z-A" },
-          { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc") || "URL ↑", title: "按URL A-Z" },
-          { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc") || "URL ↓", title: "按URL Z-A" }
+          { value: "original", label: t(settings.language, "floatingCompareSortOriginal"), title: t(settings.language, "floatingCompareSortOriginalTitle") },
+          { value: "title-asc", label: t(settings.language, "floatingCompareSortTitleAsc"), title: t(settings.language, "floatingCompareSortTitleAscTitle") },
+          { value: "title-desc", label: t(settings.language, "floatingCompareSortTitleDesc"), title: t(settings.language, "floatingCompareSortTitleDescTitle") },
+          { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc"), title: t(settings.language, "floatingCompareSortUrlAscTitle") },
+          { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc"), title: t(settings.language, "floatingCompareSortUrlDescTitle") }
         ]}
         value={sortBy}
         onChange={setSortBy}

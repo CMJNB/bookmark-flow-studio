@@ -18,7 +18,7 @@ import {
   nodeToSlim
 } from "./lib/bookmark-utils"
 import { formatDateForFileName } from "./lib/format"
-import { t, tf } from "./lib/i18n"
+import { t, tf, LANG_NAMES } from "./lib/i18n"
 import { normalizeImportData, parseStructuredInput } from "./lib/import-utils"
 import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_HASH_PROMPT_TEMPLATE, buildAiPrompt, buildHashAiPrompt, toYaml } from "./lib/prompt-utils"
 import { buildHashMap, countHashResolution, resolveHashImport, toYamlWithHashes } from "./lib/hash-utils"
@@ -927,8 +927,8 @@ function IndexPopup() {
           <div className="settings-group">
             <div className="settings-label">{t(settings.language, "settingsLanguage")}</div>
             <div className="controls wrap">
-              <button className={`page-btn ${settings.language === "zh-CN" ? "active" : ""}`} onClick={() => setLanguage("zh-CN")}>{t(settings.language, "langZh")}</button>
-              <button className={`page-btn ${settings.language === "en-US" ? "active" : ""}`} onClick={() => setLanguage("en-US")}>{t(settings.language, "langEn")}</button>
+              <button className={`page-btn ${settings.language === "zh-CN" ? "active" : ""}`} onClick={() => setLanguage("zh-CN")}>{LANG_NAMES["zh-CN"]}</button>
+              <button className={`page-btn ${settings.language === "en-US" ? "active" : ""}`} onClick={() => setLanguage("en-US")}>{LANG_NAMES["en-US"]}</button>
             </div>
           </div>
 

@@ -220,15 +220,15 @@ function CompareViewerPage() {
 
       {!loadError && compareResult ? (
         <OptionSelector
-          label={t(settings.language, "floatingCompareRowSortLabel") || "结果排序"}
+          label={t(settings.language, "floatingCompareRowSortLabel")}
           options={[
-            { value: "original", label: t(settings.language, "floatingCompareSortOriginal") || "原始", title: "按匹配顺序" },
-            { value: "label-asc", label: t(settings.language, "floatingCompareSortLabelAsc") || "标题 ↑", title: "按条目标题 A-Z" },
-            { value: "label-desc", label: t(settings.language, "floatingCompareSortLabelDesc") || "标题 ↓", title: "按条目标题 Z-A" },
-            { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc") || "URL ↑", title: "按条目URL A-Z" },
-            { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc") || "URL ↓", title: "按条目URL Z-A" },
-            { value: "count-asc", label: t(settings.language, "floatingCompareSortCountAsc") || "数量 ↑", title: "按差异项数少→多" },
-            { value: "count-desc", label: t(settings.language, "floatingCompareSortCountDesc") || "数量 ↓", title: "按差异项数多→少" }
+            { value: "original", label: t(settings.language, "floatingCompareSortOriginal"), title: t(settings.language, "floatingCompareRowSortOriginalTitle") },
+            { value: "label-asc", label: t(settings.language, "floatingCompareSortLabelAsc"), title: t(settings.language, "floatingCompareSortLabelAscTitle") },
+            { value: "label-desc", label: t(settings.language, "floatingCompareSortLabelDesc"), title: t(settings.language, "floatingCompareSortLabelDescTitle") },
+            { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc"), title: t(settings.language, "floatingCompareSortLabelUrlAscTitle") },
+            { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc"), title: t(settings.language, "floatingCompareSortLabelUrlDescTitle") },
+            { value: "count-asc", label: t(settings.language, "floatingCompareSortCountAsc"), title: t(settings.language, "floatingCompareSortCountAscTitle") },
+            { value: "count-desc", label: t(settings.language, "floatingCompareSortCountDesc"), title: t(settings.language, "floatingCompareSortCountDescTitle") }
           ]}
           value={rowSortBy}
           onChange={setRowSortBy}

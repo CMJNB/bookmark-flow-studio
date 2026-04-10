@@ -1,7 +1,7 @@
 {
   "name": "bookmark-structurer-plasmo",
   "displayName": "书签结构化整理",
-  "version": "0.10.0",
+  "version": "0.13.0",
   "description": "Chrome 书签结构化导出、AI 提示词生成与导入工具",
   "author": "",
   "scripts": {
