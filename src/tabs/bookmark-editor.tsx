@@ -1,16 +1,21 @@
 /// <reference types="chrome" />
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { Tree } from "react-arborist"
-import type { NodeRendererProps, TreeApi } from "react-arborist"
+import type { NodeApi, NodeRendererProps, TreeApi } from "react-arborist"
 
 import "./bookmark-editor.css"
-import { getTree, moveBookmark, removeBookmarkTree, updateBookmark } from "../lib/chrome-api"
+import { createBookmark, getTree, moveBookmark, removeBookmarkTree, updateBookmark } from "../lib/chrome-api"
 import { useAppSettings } from "../lib/use-app-settings"
 import { t, tf } from "../lib/i18n"
 import type { BookmarkNode } from "../types/bookmark"
 import type { AppSettings } from "../types/settings"
 
-/* ── Context: pass handlers into the custom node renderer ── */
+/* -- Types -- */
+
+type ClipboardState = { mode: "copy" | "cut"; nodes: BookmarkNode[] }
+type CreateState = { type: "folder" | "bookmark"; title: string; url: string }
+
+/* -- Context: pass handlers into the custom node renderer -- */
 
 type EditorCtx = {
   lang: AppSettings["language"]
@@ -18,14 +23,15 @@ type EditorCtx = {
   treeApi: TreeApi<BookmarkNode> | null
   onClickEdit: (node: BookmarkNode) => void
   onClickDelete: (id: string, title: string) => void
+  onClickOpen: (url: string) => void
 }
 
 const Ctx = createContext<EditorCtx>(null!)
 
-/* ── Custom Node Renderer ── */
+/* -- Custom Node Renderer -- */
 
 function BmkNode({ node, style, dragHandle }: NodeRendererProps<BookmarkNode>) {
-  const { lang, editingId, treeApi, onClickEdit, onClickDelete } = useContext(Ctx)
+  const { lang, editingId, treeApi, onClickEdit, onClickDelete, onClickOpen } = useContext(Ctx)
   const isFolder = !!node.data.children
 
   return (
@@ -81,6 +87,19 @@ function BmkNode({ node, style, dragHandle }: NodeRendererProps<BookmarkNode>) {
         {node.data.url && <span className="arb-url">{node.data.url}</span>}
       </div>
 
+      {node.data.url && (
+        <button
+          className="arb-open"
+          title={t(lang, "editorOpenLink")}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClickOpen(node.data.url!)
+          }}
+        >
+          ↗
+        </button>
+      )}
+
       <button
         className="arb-delete"
         title={t(lang, "editorDelete")}
@@ -95,7 +114,7 @@ function BmkNode({ node, style, dragHandle }: NodeRendererProps<BookmarkNode>) {
   )
 }
 
-/* ── Helpers ── */
+/* -- Helpers -- */
 
 function findNodeById(nodes: BookmarkNode[], id: string): BookmarkNode | null {
   for (const n of nodes) {
@@ -114,20 +133,13 @@ function findNodeLocation(nodes: BookmarkNode[], id: string, ancestorFolderIds: 
 } | null {
   for (const node of nodes) {
     if (node.id === id) {
-      return {
-        node,
-        ancestorFolderIds
-      }
+      return { node, ancestorFolderIds }
     }
-
     if (node.children) {
       const found = findNodeLocation(node.children, id, [...ancestorFolderIds, node.id])
-      if (found) {
-        return found
-      }
+      if (found) return found
     }
   }
-
   return null
 }
 
@@ -144,7 +156,20 @@ function collectDescendantFolderIds(node: BookmarkNode): string[] {
   return ids
 }
 
-/* ── Main Page ── */
+async function createNodeRecursive(parentId: string, node: BookmarkNode): Promise<void> {
+  const created = await createBookmark({
+    parentId,
+    title: node.title || "",
+    url: node.url ?? undefined
+  })
+  if (node.children) {
+    for (const child of node.children) {
+      await createNodeRecursive(created.id, child)
+    }
+  }
+}
+
+/* -- Main Page -- */
 
 function BookmarkEditorPage() {
   const settings = useAppSettings()
@@ -153,15 +178,21 @@ function BookmarkEditorPage() {
   const [status, setStatus] = useState("")
   const [treeHeight, setTreeHeight] = useState(500)
   const [editNode, setEditNode] = useState<{ id: string; title: string; url: string } | null>(null)
+  const [createState, setCreateState] = useState<CreateState | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedData, setSelectedData] = useState<BookmarkNode[]>([])
+  const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
+
   const bodyRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<TreeApi<BookmarkNode> | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const openedOnce = useRef(false)
   const locateBookmarkId = useRef(new URLSearchParams(window.location.search).get("bookmarkId"))
   const locateHandled = useRef(false)
 
   const lang = settings.language
 
-  /* ── Data loading ── */
+  /* -- Data loading -- */
 
   const reloadTree = useCallback(async () => {
     const data = await getTree()
@@ -178,7 +209,7 @@ function BookmarkEditorPage() {
     })()
   }, [reloadTree])
 
-  /* ── Open top-level folders after first load ── */
+  /* -- Open top-level folders after first load -- */
   useEffect(() => {
     if (!openedOnce.current && tree.length > 0 && treeRef.current) {
       openedOnce.current = true
@@ -188,12 +219,12 @@ function BookmarkEditorPage() {
     }
   }, [tree])
 
+  /* -- Locate bookmark -- */
   useEffect(() => {
     const targetId = locateBookmarkId.current
     if (!targetId || locateHandled.current || tree.length === 0 || !treeRef.current) {
       return
     }
-
     locateHandled.current = true
 
     const location = findNodeLocation(tree, targetId)
@@ -224,7 +255,7 @@ function BookmarkEditorPage() {
     )
   }, [lang, tree])
 
-  /* ── Measure body height for virtualized tree ── */
+  /* -- Measure body height -- */
   useEffect(() => {
     const el = bodyRef.current
     if (!el) return
@@ -235,7 +266,28 @@ function BookmarkEditorPage() {
     return () => ro.disconnect()
   }, [])
 
-  /* ── Handlers ── */
+  /* -- Search match count (counts direct hits, not parents) -- */
+  const matchCount = useMemo(() => {
+    if (!searchTerm) return null
+    const lower = searchTerm.toLowerCase()
+    let count = 0
+    const visit = (nodes: BookmarkNode[]) => {
+      for (const n of nodes) {
+        if (n.title?.toLowerCase().includes(lower) || n.url?.toLowerCase().includes(lower)) count++
+        if (n.children) visit(n.children)
+      }
+    }
+    visit(tree)
+    return count
+  }, [tree, searchTerm])
+
+  /* -- Custom search match for react-arborist -- */
+  const searchMatch = useCallback((node: NodeApi<BookmarkNode>, term: string): boolean => {
+    const lower = term.toLowerCase()
+    return !!(node.data.title?.toLowerCase().includes(lower) || node.data.url?.toLowerCase().includes(lower))
+  }, [])
+
+  /* -- Handlers -- */
 
   const handleMove = useCallback(
     async ({
@@ -261,6 +313,7 @@ function BookmarkEditorPage() {
   )
 
   const handleClickEdit = useCallback((node: BookmarkNode) => {
+    setCreateState(null)
     setEditNode({ id: node.id, title: node.title, url: node.url ?? "" })
   }, [])
 
@@ -294,15 +347,153 @@ function BookmarkEditorPage() {
     [lang, reloadTree, editNode]
   )
 
+  const handleOpenLink = useCallback(
+    (url: string) => {
+      if (url.startsWith("javascript:") || url.startsWith("data:")) {
+        setStatus(t(lang, "editorOpenLinkBlocked"))
+        return
+      }
+      chrome.tabs.create({ url })
+    },
+    [lang]
+  )
+
+  /* -- Resolve paste/create target folder -- */
+  const resolvePasteParentId = useCallback((): string => {
+    const sel = treeRef.current?.mostRecentNode
+    if (!sel) return "1"
+    return sel.isInternal ? sel.id : (sel.data.parentId ?? "1")
+  }, [])
+
+  /* -- Create new bookmark/folder -- */
+  const handleCreateSave = useCallback(async () => {
+    if (!createState) return
+    const parentId = resolvePasteParentId()
+    try {
+      await createBookmark({
+        parentId,
+        title:
+          createState.title ||
+          (createState.type === "folder"
+            ? t(lang, "editorNewFolderDefaultName")
+            : t(lang, "editorNewBookmarkDefaultTitle")),
+        url: createState.type === "bookmark" ? createState.url || undefined : undefined
+      })
+      setStatus(t(lang, "editorCreateSuccess"))
+      setCreateState(null)
+      await reloadTree()
+    } catch (e) {
+      setStatus(tf(lang, "editorCreateFailed", { error: (e as Error).message }))
+    }
+  }, [createState, lang, reloadTree, resolvePasteParentId])
+
+  /* -- Copy / Cut -- */
+  const handleCopy = useCallback(() => {
+    const nodes = treeRef.current?.selectedNodes
+    if (!nodes?.length) return
+    setClipboard({ mode: "copy", nodes: nodes.map((n) => n.data) })
+    setStatus(tf(lang, "editorCopied", { count: nodes.length }))
+  }, [lang])
+
+  const handleCut = useCallback(() => {
+    const nodes = treeRef.current?.selectedNodes
+    if (!nodes?.length) return
+    setClipboard({ mode: "cut", nodes: nodes.map((n) => n.data) })
+    setStatus(tf(lang, "editorCutMarked", { count: nodes.length }))
+  }, [lang])
+
+  /* -- Paste -- */
+  const handlePaste = useCallback(async () => {
+    if (!clipboard) {
+      setStatus(t(lang, "editorNothingToPaste"))
+      return
+    }
+    const parentId = resolvePasteParentId()
+    try {
+      for (const node of clipboard.nodes) {
+        await createNodeRecursive(parentId, node)
+      }
+      if (clipboard.mode === "cut") {
+        for (const node of clipboard.nodes) {
+          await removeBookmarkTree(node.id)
+        }
+        setClipboard(null)
+      }
+      setStatus(tf(lang, "editorPasteSuccess", { count: clipboard.nodes.length }))
+      await reloadTree()
+    } catch (e) {
+      setStatus(tf(lang, "editorPasteFailed", { error: (e as Error).message }))
+    }
+  }, [clipboard, lang, reloadTree, resolvePasteParentId])
+
+  /* -- Delete selected (bulk) -- */
+  const handleDeleteSelected = useCallback(
+    async (ids?: string[]) => {
+      const targetIds = ids ?? treeRef.current?.selectedNodes.map((n) => n.id) ?? []
+      if (!targetIds.length) return
+      if (!window.confirm(tf(lang, "editorDeleteSelectedConfirm", { count: targetIds.length }))) return
+      try {
+        for (const id of targetIds) {
+          await removeBookmarkTree(id)
+        }
+        setStatus(t(lang, "editorDeleteSuccess"))
+        if (editNode && targetIds.includes(editNode.id)) setEditNode(null)
+        setSelectedData([])
+        await reloadTree()
+      } catch (e) {
+        setStatus(tf(lang, "editorDeleteFailed", { error: (e as Error).message }))
+      }
+    },
+    [lang, reloadTree, editNode]
+  )
+
+  /* -- Global keyboard shortcuts -- */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case "c":
+            handleCopy()
+            e.preventDefault()
+            break
+          case "x":
+            handleCut()
+            e.preventDefault()
+            break
+          case "v":
+            void handlePaste()
+            e.preventDefault()
+            break
+          case "a":
+            treeRef.current?.selectAll()
+            e.preventDefault()
+            break
+          case "f":
+            searchInputRef.current?.focus()
+            searchInputRef.current?.select()
+            e.preventDefault()
+            break
+        }
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [handleCopy, handleCut, handlePaste])
+
+  /* -- Derived -- */
+  const editIsFolder = editNode ? !!findNodeById(tree, editNode.id)?.children : false
+  const selectedCount = selectedData.length
+
   const ctx: EditorCtx = {
     lang,
     editingId: editNode?.id ?? null,
     treeApi: treeRef.current,
     onClickEdit: handleClickEdit,
-    onClickDelete: handleDeleteNode
+    onClickDelete: handleDeleteNode,
+    onClickOpen: handleOpenLink
   }
-
-  const editIsFolder = editNode ? !!findNodeById(tree, editNode.id)?.children : false
 
   if (loadError) {
     return (
@@ -316,20 +507,153 @@ function BookmarkEditorPage() {
     <Ctx.Provider value={ctx}>
       <main className="editor-app">
         <header className="editor-header">
-          <div>
-            <h1>{t(lang, "editorTitle")}</h1>
-            <p className="editor-header-hint">{t(lang, "editorHint")}</p>
+          {/* Row 1: title + tree controls */}
+          <div className="editor-header-top">
+            <div className="editor-header-info">
+              <h1>{t(lang, "editorTitle")}</h1>
+              <p className="editor-header-hint">{t(lang, "editorHint")}</p>
+            </div>
+            <div className="editor-toolbar">
+              <button className="editor-btn" title="Ctrl+A" onClick={() => treeRef.current?.selectAll()}>
+                {t(lang, "editorSelectAll")}
+              </button>
+              <button className="editor-btn" onClick={() => treeRef.current?.openAll()}>
+                {t(lang, "editorExpandAll")}
+              </button>
+              <button className="editor-btn" onClick={() => treeRef.current?.closeAll()}>
+                {t(lang, "editorCollapseAll")}
+              </button>
+            </div>
           </div>
-          <div className="editor-toolbar">
-            <button className="editor-btn" onClick={() => treeRef.current?.openAll()}>
-              {t(lang, "editorExpandAll")}
+
+          {/* Row 2: search + action buttons */}
+          <div className="editor-action-row">
+            <div className="editor-search-field">
+              <span className="editor-search-icon">🔍</span>
+              <input
+                ref={searchInputRef}
+                className="editor-search-input"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={t(lang, "editorSearchPlaceholder")}
+                onKeyDown={(e) => e.key === "Escape" && setSearchTerm("")}
+              />
+              {searchTerm && (
+                <button className="editor-search-clear" onClick={() => setSearchTerm("")}>
+                  ×
+                </button>
+              )}
+            </div>
+
+            {matchCount !== null && (
+              <span className="editor-search-count">
+                {tf(lang, "editorSearchMatchCount", { count: matchCount })}
+              </span>
+            )}
+
+            <button
+              className="editor-btn editor-btn-primary"
+              onClick={() => {
+                setEditNode(null)
+                setCreateState({ type: "folder", title: "", url: "" })
+              }}
+            >
+              📁 {t(lang, "editorNewFolder")}
             </button>
-            <button className="editor-btn" onClick={() => treeRef.current?.closeAll()}>
-              {t(lang, "editorCollapseAll")}
+            <button
+              className="editor-btn editor-btn-primary"
+              onClick={() => {
+                setEditNode(null)
+                setCreateState({ type: "bookmark", title: "", url: "" })
+              }}
+            >
+              🔗 {t(lang, "editorNewBookmark")}
             </button>
+
+            <div className="editor-action-sep" />
+
+            <button
+              className="editor-btn"
+              disabled={selectedCount === 0}
+              title="Ctrl+C"
+              onClick={handleCopy}
+            >
+              {t(lang, "editorCopy")}
+            </button>
+            <button
+              className="editor-btn"
+              disabled={selectedCount === 0}
+              title="Ctrl+X"
+              onClick={handleCut}
+            >
+              {t(lang, "editorCut")}
+            </button>
+            <button
+              className="editor-btn"
+              disabled={!clipboard}
+              title="Ctrl+V"
+              onClick={() => void handlePaste()}
+            >
+              {t(lang, "editorPaste")}
+              {clipboard ? ` (${clipboard.nodes.length})` : ""}
+            </button>
+
+            {selectedCount > 1 && (
+              <>
+                <div className="editor-action-sep" />
+                <button
+                  className="editor-btn editor-btn-danger"
+                  onClick={() => void handleDeleteSelected()}
+                >
+                  {tf(lang, "editorDeleteSelected", { count: selectedCount })}
+                </button>
+              </>
+            )}
           </div>
         </header>
 
+        {/* Create panel */}
+        {createState && (
+          <div className="editor-create-panel">
+            <input
+              className="editor-edit-input"
+              value={createState.title}
+              placeholder={
+                createState.type === "folder"
+                  ? t(lang, "editorNewFolderDefaultName")
+                  : t(lang, "editorNewBookmarkDefaultTitle")
+              }
+              autoFocus
+              onChange={(e) => setCreateState((p) => (p ? { ...p, title: e.target.value } : p))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleCreateSave()
+                if (e.key === "Escape") setCreateState(null)
+              }}
+            />
+            {createState.type === "bookmark" && (
+              <input
+                className="editor-edit-input"
+                value={createState.url}
+                placeholder="https://..."
+                onChange={(e) => setCreateState((p) => (p ? { ...p, url: e.target.value } : p))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleCreateSave()
+                  if (e.key === "Escape") setCreateState(null)
+                }}
+              />
+            )}
+            <div className="editor-edit-actions">
+              <button className="editor-save-btn" onClick={() => void handleCreateSave()}>
+                {t(lang, "editorSave")}
+              </button>
+              <button className="editor-cancel-btn" onClick={() => setCreateState(null)}>
+                {t(lang, "editorCancel")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Edit panel */}
         {editNode && (
           <div className="editor-edit-panel">
             <input
@@ -372,12 +696,15 @@ function BookmarkEditorPage() {
               ref={treeRef}
               data={tree}
               onMove={handleMove}
+              onSelect={(nodes) => setSelectedData(nodes.map((n) => n.data))}
+              onDelete={({ ids }) => void handleDeleteSelected(ids)}
               openByDefault={false}
               width="100%"
               height={treeHeight}
               indent={20}
               rowHeight={36}
-              disableMultiSelection
+              searchTerm={searchTerm}
+              searchMatch={searchMatch}
               childrenAccessor={(d) => d.children ?? null}
             >
               {BmkNode}

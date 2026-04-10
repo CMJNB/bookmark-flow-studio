@@ -231,7 +231,28 @@ const dict: Record<string, string> = {
   editorLocateSuccess: "已定位到: {title}",
   editorLocateMissing: "要定位的书签不存在，可能已被删除",
   editorTitlePlaceholder: "标题",
-  editorUrlPlaceholder: "URL"
+  editorUrlPlaceholder: "URL",
+  editorSearchPlaceholder: "搜索标题或 URL（Ctrl+F）",
+  editorSearchMatchCount: "匹配 {count} 项",
+  editorNewFolder: "新建文件夹",
+  editorNewBookmark: "新建书签",
+  editorCopy: "复制",
+  editorCut: "剪切",
+  editorPaste: "粘贴",
+  editorOpenLink: "打开链接",
+  editorOpenLinkBlocked: "不支持直接打开此类型的链接",
+  editorDeleteSelected: "删除 ({count})",
+  editorDeleteSelectedConfirm: "确定要删除选中的 {count} 项吗？此操作不可撤销。",
+  editorCopied: "已复制 {count} 项（Ctrl+V 粘贴）",
+  editorCutMarked: "已剪切 {count} 项（粘贴后删除源）",
+  editorPasteSuccess: "已粘贴 {count} 项",
+  editorNothingToPaste: "剪贴板为空",
+  editorPasteFailed: "粘贴失败: {error}",
+  editorCreateSuccess: "已创建",
+  editorCreateFailed: "创建失败: {error}",
+  editorNewFolderDefaultName: "新建文件夹",
+  editorNewBookmarkDefaultTitle: "新建书签",
+  editorSelectAll: "全选"
 }
 
 export default dict

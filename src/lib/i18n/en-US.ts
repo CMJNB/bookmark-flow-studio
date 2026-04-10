@@ -231,7 +231,28 @@ const dict: Record<string, string> = {
   editorLocateSuccess: "Located: {title}",
   editorLocateMissing: "The bookmark to locate was not found. It may have been deleted.",
   editorTitlePlaceholder: "Title",
-  editorUrlPlaceholder: "URL"
+  editorUrlPlaceholder: "URL",
+  editorSearchPlaceholder: "Search by title or URL (Ctrl+F)",
+  editorSearchMatchCount: "{count} matches",
+  editorNewFolder: "New Folder",
+  editorNewBookmark: "New Bookmark",
+  editorCopy: "Copy",
+  editorCut: "Cut",
+  editorPaste: "Paste",
+  editorOpenLink: "Open link",
+  editorOpenLinkBlocked: "Cannot open this link type directly",
+  editorDeleteSelected: "Delete ({count})",
+  editorDeleteSelectedConfirm: "Delete {count} selected items? This cannot be undone.",
+  editorCopied: "Copied {count} items (Ctrl+V to paste)",
+  editorCutMarked: "Cut {count} items (originals removed after paste)",
+  editorPasteSuccess: "Pasted {count} items",
+  editorNothingToPaste: "Clipboard is empty",
+  editorPasteFailed: "Paste failed: {error}",
+  editorCreateSuccess: "Created",
+  editorCreateFailed: "Create failed: {error}",
+  editorNewFolderDefaultName: "New Folder",
+  editorNewBookmarkDefaultTitle: "New Bookmark",
+  editorSelectAll: "Select All"
 }
 
 export default dict
