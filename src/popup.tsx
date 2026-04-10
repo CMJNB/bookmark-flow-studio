@@ -20,14 +20,17 @@ import {
 import { formatDateForFileName } from "./lib/format"
 import { t, tf } from "./lib/i18n"
 import { normalizeImportData, parseStructuredInput } from "./lib/import-utils"
-import { DEFAULT_PROMPT_TEMPLATE, buildAiPrompt, toYaml } from "./lib/prompt-utils"
+import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_HASH_PROMPT_TEMPLATE, buildAiPrompt, buildHashAiPrompt, toYaml } from "./lib/prompt-utils"
+import { buildHashMap, countHashResolution, resolveHashImport, toYamlWithHashes } from "./lib/hash-utils"
 import {
   applyTheme,
   defaultPromptTemplateState,
   defaultSettings,
+  loadHashMap,
   loadPromptTemplateState,
   loadSettings,
   normalizePromptTemplateState,
+  saveHashMap,
   savePromptTemplateState,
   saveSettings
 } from "./lib/settings"
@@ -86,6 +89,7 @@ function IndexPopup() {
   const [configPastedData, setConfigPastedData] = useState("")
   const [isStatusVisible, setIsStatusVisible] = useState(false)
   const [copyPromptSuccess, setCopyPromptSuccess] = useState(false)
+  const [hashMap, setHashMap] = useState<Record<string, string>>({})
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
   const activeTemplate = useMemo(() => {
     return (
@@ -128,8 +132,10 @@ function IndexPopup() {
       try {
         const loaded = await loadSettings()
         const loadedTemplateState = await loadPromptTemplateState()
+        const loadedHashMap = await loadHashMap()
         setSettings(loaded)
         setTemplateState(loadedTemplateState)
+        setHashMap(loadedHashMap)
         applyTheme(loaded.theme)
         setStatus(t(loaded.language, "statusIdle"))
 
@@ -242,6 +248,104 @@ function IndexPopup() {
     setStatusByKey("statusPromptGenerated", { count: roots.length })
   }
 
+  const generateHashAiPrompt = async (): Promise<void> => {
+    const { roots } = buildExportData()
+    const slim = roots.map(nodeToSlim)
+    const newHashMap = buildHashMap(slim)
+    const yamlHash = toYamlWithHashes(slim)
+    // Find hash template or fall back to built-in hash template
+    const hashTpl =
+      templateState.templates.find((item) => item.id === "hash-template") ?? {
+        content: DEFAULT_HASH_PROMPT_TEMPLATE
+      }
+    const prompt = buildHashAiPrompt(yamlHash, hashTpl.content)
+
+    setHashMap(newHashMap)
+    await saveHashMap(newHashMap)
+    setPromptText(prompt)
+    setStatusByKey("statusHashPromptGenerated", {
+      count: roots.length,
+      hashes: Object.keys(newHashMap).length
+    })
+  }
+
+  const importFromHashText = async (rawText: string, sourceName: string): Promise<void> => {
+    if (!rawText.trim()) {
+      setStatusByKey("statusImportContentEmpty")
+      return
+    }
+
+    const confirmed = window.confirm(t(settings.language, "confirmImportWithBackup"))
+    if (!confirmed) {
+      setStatusByKey("statusImportCanceled")
+      return
+    }
+
+    if (autoBackup) {
+      setStatusByKey("statusCreatingBackup")
+      await exportJson(true)
+    }
+
+    try {
+      setStatusByKey("statusImporting")
+      const parsed = parseStructuredInput(rawText)
+      const rawItems = normalizeImportData(parsed)
+      // Load latest hash map from storage (in case it was updated in another session)
+      const latestHashMap = Object.keys(hashMap).length > 0 ? hashMap : await loadHashMap()
+      const resolved = resolveHashImport(rawItems as unknown[], latestHashMap)
+      const { resolved: resolvedCount, unresolved: unresolvedCount } = countHashResolution(resolved)
+
+      const currentTree = await getTree()
+      const parentId = getDefaultImportParentId(currentTree)
+      const importPrefix = t(settings.language, "importFolderPrefix")
+      const folder = await createBookmark({
+        parentId,
+        title: `${importPrefix} ${new Date().toLocaleString(settings.language)}`
+      })
+
+      for (const item of resolved) {
+        await createRecursive(folder.id, item)
+      }
+
+      await reloadBookmarkTree()
+
+      setStatusByKey("statusHashImportCompleted", {
+        source: sourceName,
+        folder: folder.title,
+        count: resolved.length,
+        resolved: resolvedCount,
+        unresolved: unresolvedCount
+      })
+    } catch (error) {
+      setStatusByKey("statusImportFailed", { error: (error as Error).message })
+    }
+  }
+
+  const importFromFileHash = async (): Promise<void> => {
+    if (!importFile) {
+      setStatusByKey("statusChooseImportFile")
+      return
+    }
+    try {
+      const text = await readFileText(importFile)
+      await importFromHashText(text, importFile.name)
+    } catch (error) {
+      setStatusByKey("statusReadFileFailed", { error: (error as Error).message })
+    }
+  }
+
+  const importFromPastedDataHash = async (): Promise<void> => {
+    await importFromHashText(pastedData, t(settings.language, "pastedContent"))
+  }
+
+  const openBookmarkEditor = async (): Promise<void> => {
+    try {
+      await openPopupWindow(chrome.runtime.getURL("tabs/bookmark-editor.html"), 900, 700)
+    } catch (error) {
+      setStatusByKey("floatingCompareOpenFailed", { error: (error as Error).message })
+    }
+  }
+
   const persistTemplateState = async (next: PromptTemplateState, successStatus: string): Promise<void> => {
     const normalized = normalizePromptTemplateState(next)
     setTemplateState(normalized)
@@ -256,6 +360,27 @@ function IndexPopup() {
       id,
       name: t(settings.language, "newTemplateName"),
       content: DEFAULT_PROMPT_TEMPLATE,
+      updatedAt: now
+    }
+
+    const next = {
+      ...templateState,
+      templates: [...templateState.templates, newTemplate]
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateCreated"))
+    setEditingTemplateId(id)
+    setTemplateNameDraft(newTemplate.name)
+    setTemplateContentDraft(newTemplate.content)
+  }
+
+  const createHashTemplate = async (): Promise<void> => {
+    const id = `hash-template-${Date.now()}`
+    const now = Date.now()
+    const newTemplate = {
+      id,
+      name: t(settings.language, "hashTemplateDefaultName"),
+      content: DEFAULT_HASH_PROMPT_TEMPLATE,
       updatedAt: now
     }
 
@@ -653,6 +778,9 @@ function IndexPopup() {
           <button className={`page-btn ${activePage === "compare" ? "active" : ""}`} onClick={() => setActivePage("compare")}>5. {t(settings.language, "stepCompare")}</button>
           <button className={`page-btn ${activePage === "settings" ? "active" : ""}`} onClick={() => setActivePage("settings")}>6. {t(settings.language, "stepSettings")}</button>
         </div>
+        <div className="controls" style={{ marginTop: 8 }}>
+          <button className="link-btn" onClick={() => void openBookmarkEditor()}>✎ {t(settings.language, "openBookmarkEditor")}</button>
+        </div>
       </section>
 
       {activePage === "select" ? (
@@ -718,6 +846,7 @@ function IndexPopup() {
 
           <div className="controls wrap">
             <button className="link-btn" onClick={() => void createTemplate()}>{t(settings.language, "newTemplate")}</button>
+            <button className="link-btn" onClick={() => void createHashTemplate()}>{t(settings.language, "createHashTemplate")}</button>
             <button className="link-btn" onClick={() => void saveTemplateDraft()}>{t(settings.language, "saveTemplate")}</button>
             <button className="link-btn" onClick={() => void applyEditingTemplate()}>{t(settings.language, "applyTemplate")}</button>
             <button className="link-btn" onClick={() => void deleteEditingTemplate()}>{t(settings.language, "deleteTemplate")}</button>
@@ -736,7 +865,10 @@ function IndexPopup() {
               <span>{t(settings.language, "slimMode")}</span>
             </label>
             <button className="btn primary" onClick={() => void exportJson(false)}>{t(settings.language, "exportJson")}</button>
-            <button className="btn ok" onClick={() => void exportAiPrompt()}>{t(settings.language, "generatePrompt")}</button>
+            <div className="btn-group">
+              <button className="btn ok" onClick={() => void exportAiPrompt()}>{t(settings.language, "generatePrompt")}</button>
+              <button className="btn ok" onClick={() => void generateHashAiPrompt()}>{t(settings.language, "generateHashPrompt")}</button>
+            </div>
           </section>
 
           <section className="card">
@@ -760,9 +892,15 @@ function IndexPopup() {
             <span>{t(settings.language, "autoBackup")}</span>
           </label>
           <input type="file" accept="application/json,.json,text/yaml,.yaml,.yml" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} />
-          <button className="btn warn" onClick={() => void importFromFile()}>{t(settings.language, "importFromFile")}</button>
+          <div className="btn-group">
+            <button className="btn warn" onClick={() => void importFromFile()}>{t(settings.language, "importUrlModeLabel")}: {t(settings.language, "importFromFile")}</button>
+            <button className="btn warn" onClick={() => void importFromFileHash()}>{t(settings.language, "importHashModeLabel")}: {t(settings.language, "importFromFile")}</button>
+          </div>
           <textarea className="paste-input" placeholder={t(settings.language, "pastePlaceholder")} value={pastedData} onChange={(e) => setPastedData(e.target.value)} />
-          <button className="btn warn" onClick={() => void importFromPastedData()}>{t(settings.language, "importFromPaste")}</button>
+          <div className="btn-group">
+            <button className="btn warn" onClick={() => void importFromPastedData()}>{t(settings.language, "importUrlModeLabel")}: {t(settings.language, "importFromPaste")}</button>
+            <button className="btn warn" onClick={() => void importFromPastedDataHash()}>{t(settings.language, "importHashModeLabel")}: {t(settings.language, "importFromPaste")}</button>
+          </div>
         </section>
       ) : null}
 

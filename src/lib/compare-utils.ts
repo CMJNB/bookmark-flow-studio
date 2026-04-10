@@ -9,6 +9,7 @@ export type CompareStats = {
   urlOnlyACount: number
   urlOnlyBCount: number
   urlBothCount: number
+  sameUrlDifferentTitleCount: number
   sameTitleDifferentUrlCount: number
 }
 
@@ -18,7 +19,13 @@ export type SameTitleDiffItem = {
   bEntries: BookmarkEntry[]
 }
 
-export type CompareViewerRowKind = "title-only" | "url-only" | "title-url-conflict"
+export type SameUrlDiffTitleItem = {
+  url: string
+  aEntries: BookmarkEntry[]
+  bEntries: BookmarkEntry[]
+}
+
+export type CompareViewerRowKind = "title-only" | "url-only" | "url-title-change" | "title-url-conflict"
 
 export type CompareViewerRow = {
   id: string
@@ -36,6 +43,7 @@ export type CompareResult = {
   titleOnlyB: BookmarkEntry[]
   urlOnlyA: BookmarkEntry[]
   urlOnlyB: BookmarkEntry[]
+  sameUrlDifferentTitle: SameUrlDiffTitleItem[]
   sameTitleDifferentUrl: SameTitleDiffItem[]
 }
 
@@ -98,6 +106,17 @@ function toMapByTitle(entries: BookmarkEntry[]): Map<string, BookmarkEntry[]> {
   return map
 }
 
+function toMapByUrl(entries: BookmarkEntry[]): Map<string, BookmarkEntry[]> {
+  const map = new Map<string, BookmarkEntry[]>()
+  for (const entry of entries) {
+    const key = normalizeText(entry.url)
+    const list = map.get(key) ?? []
+    list.push(entry)
+    map.set(key, list)
+  }
+  return map
+}
+
 function toSetByUrl(entries: BookmarkEntry[]): Set<string> {
   const urls = new Set<string>()
   for (const entry of entries) {
@@ -127,6 +146,8 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
 
   const aTitleMap = toMapByTitle(aEntries)
   const bTitleMap = toMapByTitle(bEntries)
+  const aUrlMap = toMapByUrl(aEntries)
+  const bUrlMap = toMapByUrl(bEntries)
   const aUrlSet = toSetByUrl(aEntries)
   const bUrlSet = toSetByUrl(bEntries)
 
@@ -140,6 +161,20 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
   const urlOnlyA = [...aUrlSet].filter((url) => !bUrlSet.has(url))
   const urlOnlyB = [...bUrlSet].filter((url) => !aUrlSet.has(url))
   const urlBoth = [...aUrlSet].filter((url) => bUrlSet.has(url))
+
+  const sameUrlDifferentTitle: SameUrlDiffTitleItem[] = []
+  for (const urlKey of urlBoth) {
+    const aTitles = new Set((aUrlMap.get(urlKey) ?? []).map((item) => normalizeText(item.title)))
+    const bTitles = new Set((bUrlMap.get(urlKey) ?? []).map((item) => normalizeText(item.title)))
+    const same = aTitles.size === bTitles.size && [...aTitles].every((title) => bTitles.has(title))
+    if (!same) {
+      sameUrlDifferentTitle.push({
+        url: (aUrlMap.get(urlKey)?.[0]?.url || bUrlMap.get(urlKey)?.[0]?.url || urlKey).trim(),
+        aEntries: sortEntries(aUrlMap.get(urlKey) ?? []),
+        bEntries: sortEntries(bUrlMap.get(urlKey) ?? [])
+      })
+    }
+  }
 
   const sameTitleDifferentUrl: SameTitleDiffItem[] = []
   for (const titleKey of titleBoth) {
@@ -198,6 +233,7 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
       urlOnlyACount: urlOnlyA.length,
       urlOnlyBCount: urlOnlyB.length,
       urlBothCount: urlBoth.length,
+      sameUrlDifferentTitleCount: sameUrlDifferentTitle.length,
       sameTitleDifferentUrlCount: sameTitleDifferentUrl.length
     },
     allEntriesA: dedupeEntries(aEntries),
@@ -206,6 +242,7 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
     titleOnlyB: titleOnlyBEntries,
     urlOnlyA: urlOnlyAEntries,
     urlOnlyB: urlOnlyBEntries,
+    sameUrlDifferentTitle,
     sameTitleDifferentUrl
   }
 }
@@ -254,6 +291,13 @@ export function buildCompareViewerRows(result: CompareResult): CompareViewerRow[
     ...buildRightOnlyRows("title-only", result.titleOnlyB, "title"),
     ...buildLeftOnlyRows("url-only", result.urlOnlyA, "url"),
     ...buildRightOnlyRows("url-only", result.urlOnlyB, "url"),
+    ...result.sameUrlDifferentTitle.map((item, index) => ({
+      id: `url-title-change-${normalizeText(item.url)}-${index}`,
+      kind: "url-title-change" as const,
+      label: item.url,
+      leftItems: sortEntries(item.aEntries),
+      rightItems: sortEntries(item.bEntries)
+    })),
     ...result.sameTitleDifferentUrl.map((item, index) => ({
       id: `title-url-conflict-${normalizeText(item.title)}-${index}`,
       kind: "title-url-conflict" as const,

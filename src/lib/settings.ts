@@ -3,6 +3,7 @@ import type { AppSettings, PromptTemplate, PromptTemplateState, ThemeMode } from
 
 const STORAGE_KEY = "bookmark_structurer_settings"
 const TEMPLATE_STORAGE_KEY = "bookmark_structurer_prompt_templates"
+const HASH_MAP_STORAGE_KEY = "bookmark_structurer_hash_map"
 
 export const defaultSettings: AppSettings = {
   theme: "system",
@@ -112,6 +113,27 @@ export async function savePromptTemplateState(state: PromptTemplateState): Promi
   const normalized = normalizePromptTemplateState(state)
   return new Promise((resolve, reject) => {
     chrome.storage.local.set({ [TEMPLATE_STORAGE_KEY]: normalized }, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      resolve()
+    })
+  })
+}
+
+export async function loadHashMap(): Promise<Record<string, string>> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([HASH_MAP_STORAGE_KEY], (result) => {
+      const map = result[HASH_MAP_STORAGE_KEY]
+      resolve(map && typeof map === "object" ? (map as Record<string, string>) : {})
+    })
+  })
+}
+
+export async function saveHashMap(map: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set({ [HASH_MAP_STORAGE_KEY]: map }, () => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message))
         return

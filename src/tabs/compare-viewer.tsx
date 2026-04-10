@@ -18,7 +18,7 @@ import { t, tf } from "../lib/i18n"
 import type { BookmarkNode, FolderTreeNode } from "../types/bookmark"
 import type { AppSettings } from "../types/settings"
 
-type CompareFilter = "title-only" | "url-only" | "title-url-conflict"
+type CompareFilter = "title-only" | "url-only" | "url-title-change" | "title-url-conflict"
 
 function CompareViewerPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
@@ -92,6 +92,9 @@ function CompareViewerPage() {
     if (row.kind === "url-only") {
       return t(settings.language, "compareTypeUrlOnly")
     }
+    if (row.kind === "url-title-change") {
+      return t(settings.language, "compareTypeUrlTitleChange")
+    }
     return t(settings.language, "compareTypeConflict")
   }
 
@@ -149,8 +152,15 @@ function CompareViewerPage() {
   }
 
   const runSelectionCompare = async (): Promise<void> => {
-    const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
-    const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
+    // Reload fresh bookmark data before comparing so stale/changed bookmarks are reflected
+    const freshData = await getTree()
+    const freshAllNodes = flattenNodes(freshData)
+    setTree(freshData)
+    const freshBuiltTree = buildFolderTree(freshData)
+    setFolderTree(freshBuiltTree)
+
+    const rootsA = buildSelectedExportRoots(freshData, compareSetA, freshAllNodes)
+    const rootsB = buildSelectedExportRoots(freshData, compareSetB, freshAllNodes)
     const result = compareBookmarkSelections(rootsA, rootsB)
 
     setCompareResult(result)
@@ -191,6 +201,7 @@ function CompareViewerPage() {
       <section className="compare-viewer-toolbar">
         <button className={`page-btn ${filter === "title-only" ? "active" : ""}`} onClick={() => setFilter("title-only")}>{t(settings.language, "floatingCompareFilterTitleOnly")}</button>
         <button className={`page-btn ${filter === "url-only" ? "active" : ""}`} onClick={() => setFilter("url-only")}>{t(settings.language, "floatingCompareFilterUrlOnly")}</button>
+        <button className={`page-btn ${filter === "url-title-change" ? "active" : ""}`} onClick={() => setFilter("url-title-change")}>{t(settings.language, "floatingCompareFilterUrlTitleChange")}</button>
         <button className={`page-btn ${filter === "title-url-conflict" ? "active" : ""}`} onClick={() => setFilter("title-url-conflict")}>{t(settings.language, "floatingCompareFilterConflict")}</button>
         <button className="page-btn" onClick={() => void runSelectionCompare()}>{t(settings.language, "runCompare")}</button>
         <button className="page-btn" onClick={() => void openSearchPage()}>{t(settings.language, "floatingCompareOpenSearchPage")}</button>
@@ -243,6 +254,7 @@ function CompareViewerPage() {
           <div className="compare-viewer-stat-item">{t(settings.language, "compareStatUrlOnlyB")}: {compareStats.urlOnlyBCount}</div>
           <div className="compare-viewer-stat-item">{t(settings.language, "compareStatTitleBoth")}: {compareStats.titleBothCount}</div>
           <div className="compare-viewer-stat-item">{t(settings.language, "compareStatUrlBoth")}: {compareStats.urlBothCount}</div>
+          <div className="compare-viewer-stat-item wide">{t(settings.language, "compareStatUrlTitleChange")}: {compareStats.sameUrlDifferentTitleCount}</div>
           <div className="compare-viewer-stat-item wide">{t(settings.language, "compareStatConflict")}: {compareStats.sameTitleDifferentUrlCount}</div>
         </section>
       ) : null}

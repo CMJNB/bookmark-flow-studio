@@ -73,3 +73,42 @@ export function openPopupWindow(url: string, width = 1180, height = 820): Promis
     )
   })
 }
+
+export function updateBookmark(id: string, changes: { title?: string; url?: string }): Promise<BookmarkNode> {
+  return new Promise((resolve, reject) => {
+    chrome.bookmarks.update(id, changes, (node) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      resolve(node)
+    })
+  })
+}
+
+export function moveBookmark(
+  id: string,
+  destination: { parentId?: string; index?: number }
+): Promise<BookmarkNode> {
+  return new Promise((resolve, reject) => {
+    chrome.bookmarks.move(id, destination, (node) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      resolve(node)
+    })
+  })
+}
+
+export function removeBookmarkTree(id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    chrome.bookmarks.removeTree(id, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      resolve()
+    })
+  })
+}

@@ -338,6 +338,25 @@ input[type="file"] {
   max-height: 420px;
 }
 
+.btn-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.btn-group .btn {
+  margin-top: 0;
+}
+
+.btn-group + .btn-group {
+  margin-top: 8px;
+}
+
+.btn + .btn-group {
+  margin-top: 8px;
+}
+
 .status-header {
   display: flex;
   align-items: center;

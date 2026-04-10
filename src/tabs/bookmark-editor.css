@@ -1,0 +1,316 @@
+:root {
+  --bg: #f5f7fb;
+  --bg-accent-a: #eef2ff;
+  --bg-accent-b: #ecfeff;
+  --card: #ffffff;
+  --surface: #fafafa;
+  --surface-soft: #f9fafb;
+  --text: #1f2937;
+  --text-strong: #111827;
+  --muted: #6b7280;
+  --interactive: #334155;
+  --interactive-hover: #eef2ff;
+  --link: #0f766e;
+  --border: #d1d5db;
+  --primary: #1d4ed8;
+  --primary-hover: #1e40af;
+  --warn: #b45309;
+  --ok: #047857;
+  --drop-inside: #10b981;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --bg-accent-a: #111827;
+  --bg-accent-b: #0f172a;
+  --card: #111827;
+  --surface: #172033;
+  --surface-soft: #1f2937;
+  --text: #e5e7eb;
+  --text-strong: #f3f4f6;
+  --muted: #9ca3af;
+  --interactive: #d1d5db;
+  --interactive-hover: #1f2937;
+  --link: #5eead4;
+  --border: #374151;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --warn: #d97706;
+  --ok: #059669;
+  --drop-inside: #34d399;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+}
+
+/* ── Layout ── */
+
+.editor-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.editor-header h1 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-strong);
+}
+
+.editor-header-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.editor-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--interactive);
+  white-space: nowrap;
+}
+
+.editor-btn:hover {
+  background: var(--interactive-hover);
+}
+
+.editor-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-error {
+  color: var(--warn);
+  padding: 16px;
+  font-size: 13px;
+}
+
+.editor-status {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
+  min-height: 30px;
+}
+
+/* ── Edit Panel (above tree) ── */
+
+.editor-edit-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.editor-edit-input {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
+.editor-edit-input:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
+.editor-edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-save-btn,
+.editor-cancel-btn {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-soft);
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--interactive);
+}
+
+.editor-save-btn {
+  background: var(--ok);
+  color: #fff;
+  border-color: var(--ok);
+}
+
+.editor-save-btn:hover {
+  opacity: 0.85;
+}
+
+.editor-cancel-btn:hover {
+  background: var(--interactive-hover);
+}
+
+/* ── Tree Node Row ── */
+
+.arb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding-right: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+
+.arb-row:hover {
+  background: var(--interactive-hover);
+}
+
+.arb-row.selected {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.arb-row.editing {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.arb-row.dragging {
+  opacity: 0.4;
+}
+
+.arb-row.drop-target {
+  background: color-mix(in srgb, var(--drop-inside) 15%, transparent);
+}
+
+/* Toggle button */
+.arb-toggle {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--interactive);
+  font-size: 10px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.arb-toggle:hover {
+  background: var(--interactive-hover);
+}
+
+/* Leaf icon */
+.arb-leaf-icon {
+  width: 18px;
+  min-width: 18px;
+  text-align: center;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Node info */
+.arb-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  cursor: pointer;
+}
+
+.arb-info:hover .arb-title {
+  text-decoration: underline;
+  color: var(--link);
+}
+
+.arb-title {
+  font-size: 13px;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.arb-url {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+/* Delete button */
+.arb-delete {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.arb-row:hover .arb-delete {
+  opacity: 1;
+}
+
+.arb-delete:hover {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
