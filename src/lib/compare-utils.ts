@@ -81,6 +81,7 @@ function collectBookmarkEntries(nodes: BookmarkNode[]): BookmarkEntry[] {
 
     if (node.url) {
       entries.push({
+        id: node.id,
         title: node.title || "",
         url: node.url,
         path: folderPath.join(" / ")
@@ -194,6 +195,7 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
   const rawTitleOnlyAEntries = dedupeEntries(
     titleOnlyA.flatMap((key) =>
       (aTitleMap.get(key) ?? []).map((entry) => ({
+        id: entry.id,
         title: entry.title,
         url: entry.url,
         path: entry.path
@@ -206,6 +208,7 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
   const rawTitleOnlyBEntries = dedupeEntries(
     titleOnlyB.flatMap((key) =>
       (bTitleMap.get(key) ?? []).map((entry) => ({
+        id: entry.id,
         title: entry.title,
         url: entry.url,
         path: entry.path

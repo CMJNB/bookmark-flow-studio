@@ -1,26 +1,27 @@
 import { useEffect, useMemo, useState } from "react"
 
 import "./compare-viewer.css"
+import { CompareEntryList } from "../components/CompareEntryList"
+import { PageHeader } from "../components/PageHeader"
+import { SearchInput } from "../components/SearchInput"
+import { EmptyState } from "../components/EmptyState"
 import { loadCompareViewerState } from "../lib/compare-viewer-state"
-import { applyTheme, defaultSettings, loadSettings } from "../lib/settings"
+import { useAppSettings } from "../lib/use-app-settings"
+import { useStorageListener } from "../lib/use-storage-listener"
 import { t, tf } from "../lib/i18n"
 import type { BookmarkEntry } from "../types/bookmark"
-import type { AppSettings } from "../types/settings"
 
 function CompareSearchPage() {
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const settings = useAppSettings()
   const [keyword, setKeyword] = useState("")
   const [entriesA, setEntriesA] = useState<BookmarkEntry[]>([])
   const [entriesB, setEntriesB] = useState<BookmarkEntry[]>([])
   const [loadError, setLoadError] = useState("")
+  const [actionStatus, setActionStatus] = useState("")
 
   useEffect(() => {
     ;(async () => {
       try {
-        const loadedSettings = await loadSettings()
-        setSettings(loadedSettings)
-        applyTheme(loadedSettings.theme)
-
         const state = await loadCompareViewerState()
         if (!state) {
           return
@@ -34,41 +35,15 @@ function CompareSearchPage() {
     })()
   }, [])
 
-  useEffect(() => {
-    const listener = (_changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName !== "local") {
-        return
-      }
-
-      void (async () => {
-        const loadedSettings = await loadSettings()
-        setSettings(loadedSettings)
-        applyTheme(loadedSettings.theme)
-
-        const state = await loadCompareViewerState()
-        if (!state) {
-          return
-        }
-
-        setEntriesA(state.compareResult.allEntriesA)
-        setEntriesB(state.compareResult.allEntriesB)
-      })()
+  useStorageListener(async () => {
+    const state = await loadCompareViewerState()
+    if (!state) {
+      return
     }
 
-    chrome.storage.onChanged.addListener(listener)
-    return () => chrome.storage.onChanged.removeListener(listener)
-  }, [])
-
-  useEffect(() => {
-    if (settings.theme !== "system") {
-      return undefined
-    }
-
-    const media = window.matchMedia("(prefers-color-scheme: dark)")
-    const listener = () => applyTheme("system")
-    media.addEventListener("change", listener)
-    return () => media.removeEventListener("change", listener)
-  }, [settings.theme])
+    setEntriesA(state.compareResult.allEntriesA)
+    setEntriesB(state.compareResult.allEntriesB)
+  })
 
   const normalizedKeyword = keyword.trim().toLowerCase()
 
@@ -85,40 +60,35 @@ function CompareSearchPage() {
 
   return (
     <main className="compare-viewer-app">
-      <header className="compare-viewer-header">
-        <div>
-          <h1>{t(settings.language, "floatingCompareSearchPageTitle")}</h1>
-          <p>{t(settings.language, "floatingCompareSearchPageHint")}</p>
-        </div>
-        <div className="compare-viewer-meta">
+      <PageHeader
+        title={t(settings.language, "floatingCompareSearchPageTitle")}
+        subtitle={t(settings.language, "floatingCompareSearchPageHint")}
+        meta={
           <div>{tf(settings.language, "floatingCompareSearchResultCount", { a: filteredA.length, b: filteredB.length })}</div>
-        </div>
-      </header>
+        }
+      />
 
       <section className="compare-viewer-search-grid one-column">
-        <div className="compare-viewer-search-wrap">
-          <input
-            className="compare-viewer-search-input with-clear"
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={t(settings.language, "floatingCompareSearchKeyword")}
-          />
-          {keyword ? (
-            <button className="search-clear-btn" onClick={() => setKeyword("")} aria-label={t(settings.language, "clearSearch")}>
-              ×
-            </button>
-          ) : null}
-        </div>
+        <SearchInput
+          value={keyword}
+          onChange={setKeyword}
+          placeholder={t(settings.language, "floatingCompareSearchKeyword")}
+          language={settings.language}
+        />
       </section>
 
-      {loadError ? <section className="compare-viewer-empty">{loadError}</section> : null}
+      {actionStatus ? <section className="compare-viewer-inline-status">{actionStatus}</section> : null}
+
+      {loadError ? (
+        <EmptyState message={loadError} icon="❌" />
+      ) : null}
 
       {!loadError && entriesA.length === 0 && entriesB.length === 0 ? (
-        <section className="compare-viewer-empty">{t(settings.language, "floatingCompareEmpty")}</section>
+        <EmptyState message={t(settings.language, "floatingCompareEmpty")} icon="📭" />
       ) : null}
 
       {!loadError && entriesA.length + entriesB.length > 0 && filteredA.length + filteredB.length === 0 ? (
-        <section className="compare-viewer-empty">{t(settings.language, "floatingCompareSearchNoResult")}</section>
+        <EmptyState message={t(settings.language, "floatingCompareSearchNoResult")} icon="🔍" />
       ) : null}
 
       {!loadError && filteredA.length + filteredB.length > 0 ? (
@@ -128,15 +98,13 @@ function CompareSearchPage() {
               <h2>{t(settings.language, "floatingCompareColumnA")}</h2>
             </div>
             {filteredA.length ? (
-              <ul className="compare-viewer-entry-list">
-                {filteredA.map((entry, index) => (
-                  <li key={`a-${entry.url}-${entry.path}-${index}`}>
-                    <div className="compare-viewer-entry-title">{entry.title || t(settings.language, "emptyTitle")}</div>
-                    <div className="compare-viewer-entry-sub">URL: {entry.url}</div>
-                    <div className="compare-viewer-entry-sub">{t(settings.language, "sourcePath")}: {entry.path || t(settings.language, "rootPath")}</div>
-                  </li>
-                ))}
-              </ul>
+              <CompareEntryList
+                entries={filteredA}
+                language={settings.language}
+                sideKey="a"
+                rowKey="search"
+                onStatusChange={setActionStatus}
+              />
             ) : (
               <div className="compare-viewer-empty-side">{t(settings.language, "floatingCompareRowEmpty")}</div>
             )}
@@ -147,15 +115,13 @@ function CompareSearchPage() {
               <h2>{t(settings.language, "floatingCompareColumnB")}</h2>
             </div>
             {filteredB.length ? (
-              <ul className="compare-viewer-entry-list">
-                {filteredB.map((entry, index) => (
-                  <li key={`b-${entry.url}-${entry.path}-${index}`}>
-                    <div className="compare-viewer-entry-title">{entry.title || t(settings.language, "emptyTitle")}</div>
-                    <div className="compare-viewer-entry-sub">URL: {entry.url}</div>
-                    <div className="compare-viewer-entry-sub">{t(settings.language, "sourcePath")}: {entry.path || t(settings.language, "rootPath")}</div>
-                  </li>
-                ))}
-              </ul>
+              <CompareEntryList
+                entries={filteredB}
+                language={settings.language}
+                sideKey="b"
+                rowKey="search"
+                onStatusChange={setActionStatus}
+              />
             ) : (
               <div className="compare-viewer-empty-side">{t(settings.language, "floatingCompareRowEmpty")}</div>
             )}

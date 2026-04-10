@@ -1,30 +1,31 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 import "./compare-viewer.css"
-import { FolderTreeView } from "../components/FolderTreeView"
+import { CompareEntryList } from "../components/CompareEntryList"
+import { CompareSetEditor } from "../components/CompareSetEditor"
+import { PageHeader } from "../components/PageHeader"
+import { TabButton } from "../components/TabButton"
+import { EmptyState } from "../components/EmptyState"
 import { buildCompareViewerRows, compareBookmarkSelections } from "../lib/compare-utils"
 import type { CompareResult, CompareStats, CompareViewerRow } from "../lib/compare-utils"
 import { saveCompareViewerState } from "../lib/compare-viewer-state"
-import { getTree, openPopupWindow } from "../lib/chrome-api"
+import { openPopupWindow } from "../lib/chrome-api"
 import {
-  buildFolderTree,
   buildSelectedExportRoots,
   flattenFolderTreeIds,
   flattenNodes,
   getDescendantFolderIds
 } from "../lib/bookmark-utils"
-import { applyTheme, defaultSettings, loadSettings } from "../lib/settings"
+import { useAppSettings } from "../lib/use-app-settings"
+import { useBookmarkTree } from "../lib/use-bookmark-tree"
 import { t, tf } from "../lib/i18n"
-import type { BookmarkNode, FolderTreeNode } from "../types/bookmark"
-import type { AppSettings } from "../types/settings"
+import type { FolderTreeNode } from "../types/bookmark"
 
 type CompareFilter = "title-only" | "url-only" | "url-title-change" | "title-url-conflict"
 
 function CompareViewerPage() {
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
-  const [tree, setTree] = useState<BookmarkNode[]>([])
-  const [folderTree, setFolderTree] = useState<FolderTreeNode[]>([])
-  const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([])
+  const settings = useAppSettings()
+  const { tree, folderTree, expandedFolderIds, setExpandedFolderIds, loadError } = useBookmarkTree()
   const [compareSetA, setCompareSetA] = useState<string[]>([])
   const [compareSetB, setCompareSetB] = useState<string[]>([])
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
@@ -34,54 +35,8 @@ function CompareViewerPage() {
   const [compareStats, setCompareStats] = useState<CompareStats | null>(null)
   const [createdAt, setCreatedAt] = useState<number | null>(null)
   const [filter, setFilter] = useState<CompareFilter>("title-only")
-  const [loadError, setLoadError] = useState("")
+  const [actionStatus, setActionStatus] = useState("")
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
-
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const loadedSettings = await loadSettings()
-        setSettings(loadedSettings)
-        applyTheme(loadedSettings.theme)
-
-        const data = await getTree()
-        setTree(data)
-        const builtTree = buildFolderTree(data)
-        setFolderTree(builtTree)
-        setExpandedFolderIds(builtTree.map((item) => item.id))
-      } catch (error) {
-        setLoadError((error as Error).message)
-      }
-    })()
-  }, [])
-
-  useEffect(() => {
-    const listener = (_changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName !== "local") {
-        return
-      }
-
-      void (async () => {
-        const loadedSettings = await loadSettings()
-        setSettings(loadedSettings)
-        applyTheme(loadedSettings.theme)
-      })()
-    }
-
-    chrome.storage.onChanged.addListener(listener)
-    return () => chrome.storage.onChanged.removeListener(listener)
-  }, [])
-
-  useEffect(() => {
-    if (settings.theme !== "system") {
-      return undefined
-    }
-
-    const media = window.matchMedia("(prefers-color-scheme: dark)")
-    const listener = () => applyTheme("system")
-    media.addEventListener("change", listener)
-    return () => media.removeEventListener("change", listener)
-  }, [settings.theme])
 
   const filteredRows = useMemo(() => rows.filter((row) => row.kind === filter), [filter, rows])
 
@@ -111,7 +66,11 @@ function CompareViewerPage() {
   }
 
   const toggleExpanded = (id: string): void => {
-    setExpandedFolderIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+    setExpandedFolderIds(
+      expandedFolderIds.includes(id)
+        ? expandedFolderIds.filter((item) => item !== id)
+        : [...expandedFolderIds, id]
+    )
   }
 
   const toggleCompareSetFolder = (target: "A" | "B", id: string): void => {
@@ -152,30 +111,27 @@ function CompareViewerPage() {
   }
 
   const runSelectionCompare = async (): Promise<void> => {
-    // Reload fresh bookmark data before comparing so stale/changed bookmarks are reflected
-    const freshData = await getTree()
-    const freshAllNodes = flattenNodes(freshData)
-    setTree(freshData)
-    const freshBuiltTree = buildFolderTree(freshData)
-    setFolderTree(freshBuiltTree)
+    try {
+      const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
+      const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
+      const result = compareBookmarkSelections(rootsA, rootsB)
 
-    const rootsA = buildSelectedExportRoots(freshData, compareSetA, freshAllNodes)
-    const rootsB = buildSelectedExportRoots(freshData, compareSetB, freshAllNodes)
-    const result = compareBookmarkSelections(rootsA, rootsB)
+      setCompareResult(result)
+      setRows(buildCompareViewerRows(result))
+      setCompareStats(result.stats)
+      setCompareSetACount(compareSetA.length)
+      setCompareSetBCount(compareSetB.length)
+      setCreatedAt(Date.now())
 
-    setCompareResult(result)
-    setRows(buildCompareViewerRows(result))
-    setCompareStats(result.stats)
-    setCompareSetACount(compareSetA.length)
-    setCompareSetBCount(compareSetB.length)
-    setCreatedAt(Date.now())
-
-    await saveCompareViewerState({
-      compareResult: result,
-      compareSetACount: compareSetA.length,
-      compareSetBCount: compareSetB.length,
-      createdAt: Date.now()
-    })
+      await saveCompareViewerState({
+        compareResult: result,
+        compareSetACount: compareSetA.length,
+        compareSetBCount: compareSetB.length,
+        createdAt: Date.now()
+      })
+    } catch (error) {
+      setActionStatus((error as Error).message)
+    }
   }
 
   const clearCompare = (): void => {
@@ -183,65 +139,66 @@ function CompareViewerPage() {
     setRows([])
     setCompareStats(null)
     setCreatedAt(null)
+    setActionStatus("")
   }
 
   return (
     <main className="compare-viewer-app">
-      <header className="compare-viewer-header">
-        <div>
-          <h1>{t(settings.language, "floatingCompareTitle")}</h1>
-          <p>{t(settings.language, "floatingCompareHint")}</p>
-        </div>
-        <div className="compare-viewer-meta">
-          <div>{tf(settings.language, "floatingCompareSetCount", { a: compareSetACount, b: compareSetBCount })}</div>
-          {createdAt ? <div>{tf(settings.language, "floatingCompareGeneratedAt", { time: new Date(createdAt).toLocaleString(settings.language) })}</div> : null}
-        </div>
-      </header>
+      <PageHeader
+        title={t(settings.language, "floatingCompareTitle")}
+        subtitle={t(settings.language, "floatingCompareHint")}
+        meta={
+          <>
+            <div>{tf(settings.language, "floatingCompareSetCount", { a: compareSetACount, b: compareSetBCount })}</div>
+            {createdAt ? <div>{tf(settings.language, "floatingCompareGeneratedAt", { time: new Date(createdAt).toLocaleString(settings.language) })}</div> : null}
+          </>
+        }
+      />
 
       <section className="compare-viewer-toolbar">
-        <button className={`page-btn ${filter === "title-only" ? "active" : ""}`} onClick={() => setFilter("title-only")}>{t(settings.language, "floatingCompareFilterTitleOnly")}</button>
-        <button className={`page-btn ${filter === "url-only" ? "active" : ""}`} onClick={() => setFilter("url-only")}>{t(settings.language, "floatingCompareFilterUrlOnly")}</button>
-        <button className={`page-btn ${filter === "url-title-change" ? "active" : ""}`} onClick={() => setFilter("url-title-change")}>{t(settings.language, "floatingCompareFilterUrlTitleChange")}</button>
-        <button className={`page-btn ${filter === "title-url-conflict" ? "active" : ""}`} onClick={() => setFilter("title-url-conflict")}>{t(settings.language, "floatingCompareFilterConflict")}</button>
+        <TabButton isActive={filter === "title-only"} onClick={() => setFilter("title-only")}>
+          {t(settings.language, "floatingCompareFilterTitleOnly")}
+        </TabButton>
+        <TabButton isActive={filter === "url-only"} onClick={() => setFilter("url-only")}>
+          {t(settings.language, "floatingCompareFilterUrlOnly")}
+        </TabButton>
+        <TabButton isActive={filter === "url-title-change"} onClick={() => setFilter("url-title-change")}>
+          {t(settings.language, "floatingCompareFilterUrlTitleChange")}
+        </TabButton>
+        <TabButton isActive={filter === "title-url-conflict"} onClick={() => setFilter("title-url-conflict")}>
+          {t(settings.language, "floatingCompareFilterConflict")}
+        </TabButton>
         <button className="page-btn" onClick={() => void runSelectionCompare()}>{t(settings.language, "runCompare")}</button>
         <button className="page-btn" onClick={() => void openSearchPage()}>{t(settings.language, "floatingCompareOpenSearchPage")}</button>
         <button className="page-btn" onClick={clearCompare}>{t(settings.language, "clearCompare")}</button>
       </section>
 
-      <section className="compare-set-editor-grid">
-        <div className="compare-set-editor">
-          <div className="compare-viewer-column-title">{t(settings.language, "compareSetAEditor")}</div>
-          <div className="folder-list">
-            <FolderTreeView
-              nodes={folderTree}
-              expandedFolderIds={expandedFolderIds}
-              selectedFolderIds={compareSetA}
-              onToggleExpanded={toggleExpanded}
-              onToggleSelected={(id) => toggleCompareSetFolder("A", id)}
-            />
-          </div>
-          <div className="controls">
-            <button className="page-btn" onClick={() => selectAllCompareSet("A")}>{t(settings.language, "compareSetSelectAll")}</button>
-            <button className="page-btn" onClick={() => clearCompareSet("A")}>{t(settings.language, "compareSetClear")}</button>
-          </div>
-        </div>
+      {actionStatus ? <section className="compare-viewer-inline-status">{actionStatus}</section> : null}
 
-        <div className="compare-set-editor">
-          <div className="compare-viewer-column-title">{t(settings.language, "compareSetBEditor")}</div>
-          <div className="folder-list">
-            <FolderTreeView
-              nodes={folderTree}
-              expandedFolderIds={expandedFolderIds}
-              selectedFolderIds={compareSetB}
-              onToggleExpanded={toggleExpanded}
-              onToggleSelected={(id) => toggleCompareSetFolder("B", id)}
-            />
-          </div>
-          <div className="controls">
-            <button className="page-btn" onClick={() => selectAllCompareSet("B")}>{t(settings.language, "compareSetSelectAll")}</button>
-            <button className="page-btn" onClick={() => clearCompareSet("B")}>{t(settings.language, "compareSetClear")}</button>
-          </div>
-        </div>
+      <section className="compare-set-editor-grid">
+        <CompareSetEditor
+          language={settings.language}
+          title={t(settings.language, "compareSetAEditor")}
+          nodes={folderTree}
+          expandedFolderIds={expandedFolderIds}
+          selectedFolderIds={compareSetA}
+          onToggleExpanded={toggleExpanded}
+          onToggleSelected={(id) => toggleCompareSetFolder("A", id)}
+          onSelectAll={() => selectAllCompareSet("A")}
+          onClear={() => clearCompareSet("A")}
+        />
+
+        <CompareSetEditor
+          language={settings.language}
+          title={t(settings.language, "compareSetBEditor")}
+          nodes={folderTree}
+          expandedFolderIds={expandedFolderIds}
+          selectedFolderIds={compareSetB}
+          onToggleExpanded={toggleExpanded}
+          onToggleSelected={(id) => toggleCompareSetFolder("B", id)}
+          onSelectAll={() => selectAllCompareSet("B")}
+          onClear={() => clearCompareSet("B")}
+        />
       </section>
 
       {compareStats ? (
@@ -259,11 +216,17 @@ function CompareViewerPage() {
         </section>
       ) : null}
 
-      {loadError ? <section className="compare-viewer-empty">{tf(settings.language, "floatingCompareOpenFailed", { error: loadError })}</section> : null}
+      {loadError ? (
+        <EmptyState message={tf(settings.language, "floatingCompareOpenFailed", { error: loadError })} icon="❌" />
+      ) : null}
 
-      {!loadError && !compareResult ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareNoData")}</section> : null}
+      {!loadError && !compareResult ? (
+        <EmptyState message={t(settings.language, "floatingCompareNoData")} icon="📭" />
+      ) : null}
 
-      {!loadError && compareResult && filteredRows.length === 0 ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareNoFilteredRows")}</section> : null}
+      {!loadError && compareResult && filteredRows.length === 0 ? (
+        <EmptyState message={t(settings.language, "floatingCompareNoFilteredRows")} icon="🔍" />
+      ) : null}
 
       {!loadError && filteredRows.length > 0 ? (
         <section className="compare-viewer-grid">
@@ -278,15 +241,13 @@ function CompareViewerPage() {
                 <div className="compare-viewer-column">
                   <div className="compare-viewer-column-title">{t(settings.language, "floatingCompareColumnA")}</div>
                   {row.leftItems.length ? (
-                    <ul className="compare-viewer-entry-list">
-                      {row.leftItems.map((item, index) => (
-                        <li key={`left-${row.id}-${item.url}-${item.path}-${index}`}>
-                          <div className="compare-viewer-entry-title">{item.title || t(settings.language, "emptyTitle")}</div>
-                          <div className="compare-viewer-entry-sub">URL: {item.url}</div>
-                          <div className="compare-viewer-entry-sub">{t(settings.language, "sourcePath")}: {item.path || t(settings.language, "rootPath")}</div>
-                        </li>
-                      ))}
-                    </ul>
+                    <CompareEntryList
+                      entries={row.leftItems}
+                      language={settings.language}
+                      sideKey="left"
+                      rowKey={row.id}
+                      onStatusChange={setActionStatus}
+                    />
                   ) : (
                     <div className="compare-viewer-empty-side">{t(settings.language, "floatingCompareRowEmpty")}</div>
                   )}
@@ -295,15 +256,13 @@ function CompareViewerPage() {
                 <div className="compare-viewer-column">
                   <div className="compare-viewer-column-title">{t(settings.language, "floatingCompareColumnB")}</div>
                   {row.rightItems.length ? (
-                    <ul className="compare-viewer-entry-list">
-                      {row.rightItems.map((item, index) => (
-                        <li key={`right-${row.id}-${item.url}-${item.path}-${index}`}>
-                          <div className="compare-viewer-entry-title">{item.title || t(settings.language, "emptyTitle")}</div>
-                          <div className="compare-viewer-entry-sub">URL: {item.url}</div>
-                          <div className="compare-viewer-entry-sub">{t(settings.language, "sourcePath")}: {item.path || t(settings.language, "rootPath")}</div>
-                        </li>
-                      ))}
-                    </ul>
+                    <CompareEntryList
+                      entries={row.rightItems}
+                      language={settings.language}
+                      sideKey="right"
+                      rowKey={row.id}
+                      onStatusChange={setActionStatus}
+                    />
                   ) : (
                     <div className="compare-viewer-empty-side">{t(settings.language, "floatingCompareRowEmpty")}</div>
                   )}

@@ -1,7 +1,7 @@
 {
   "name": "bookmark-structurer-plasmo",
   "displayName": "书签结构化整理",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Chrome 书签结构化导出、AI 提示词生成与导入工具",
   "author": "",
   "scripts": {
@@ -10,10 +10,11 @@
     "package": "plasmo package"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.23",
     "react": "18.3.1",
     "react-arborist": "^3.4.3",
     "react-dom": "18.3.1",
-    "yaml": "2.8.1"
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/chrome": "0.0.288",

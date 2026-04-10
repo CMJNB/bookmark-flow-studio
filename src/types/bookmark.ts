@@ -22,6 +22,7 @@ export type CreateBookmarkInput = {
 }
 
 export type BookmarkEntry = {
+  id: string
   title: string
   url: string
   path: string

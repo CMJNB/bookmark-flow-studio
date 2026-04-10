@@ -5,7 +5,7 @@ import type { NodeRendererProps, TreeApi } from "react-arborist"
 
 import "./bookmark-editor.css"
 import { getTree, moveBookmark, removeBookmarkTree, updateBookmark } from "../lib/chrome-api"
-import { applyTheme, defaultSettings, loadSettings } from "../lib/settings"
+import { useAppSettings } from "../lib/use-app-settings"
 import { t, tf } from "../lib/i18n"
 import type { BookmarkNode } from "../types/bookmark"
 import type { AppSettings } from "../types/settings"
@@ -108,6 +108,29 @@ function findNodeById(nodes: BookmarkNode[], id: string): BookmarkNode | null {
   return null
 }
 
+function findNodeLocation(nodes: BookmarkNode[], id: string, ancestorFolderIds: string[] = []): {
+  node: BookmarkNode
+  ancestorFolderIds: string[]
+} | null {
+  for (const node of nodes) {
+    if (node.id === id) {
+      return {
+        node,
+        ancestorFolderIds
+      }
+    }
+
+    if (node.children) {
+      const found = findNodeLocation(node.children, id, [...ancestorFolderIds, node.id])
+      if (found) {
+        return found
+      }
+    }
+  }
+
+  return null
+}
+
 function collectDescendantFolderIds(node: BookmarkNode): string[] {
   const ids: string[] = []
   if (node.children) {
@@ -124,7 +147,7 @@ function collectDescendantFolderIds(node: BookmarkNode): string[] {
 /* ── Main Page ── */
 
 function BookmarkEditorPage() {
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const settings = useAppSettings()
   const [tree, setTree] = useState<BookmarkNode[]>([])
   const [loadError, setLoadError] = useState("")
   const [status, setStatus] = useState("")
@@ -133,6 +156,8 @@ function BookmarkEditorPage() {
   const bodyRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<TreeApi<BookmarkNode> | null>(null)
   const openedOnce = useRef(false)
+  const locateBookmarkId = useRef(new URLSearchParams(window.location.search).get("bookmarkId"))
+  const locateHandled = useRef(false)
 
   const lang = settings.language
 
@@ -146,36 +171,12 @@ function BookmarkEditorPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const s = await loadSettings()
-        setSettings(s)
-        applyTheme(s.theme)
         await reloadTree()
       } catch (e) {
         setLoadError((e as Error).message)
       }
     })()
   }, [reloadTree])
-
-  useEffect(() => {
-    const listener = (_c: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area !== "local") return
-      void (async () => {
-        const s = await loadSettings()
-        setSettings(s)
-        applyTheme(s.theme)
-      })()
-    }
-    chrome.storage.onChanged.addListener(listener)
-    return () => chrome.storage.onChanged.removeListener(listener)
-  }, [])
-
-  useEffect(() => {
-    if (settings.theme !== "system") return undefined
-    const mq = window.matchMedia("(prefers-color-scheme: dark)")
-    const listener = () => applyTheme("system")
-    mq.addEventListener("change", listener)
-    return () => mq.removeEventListener("change", listener)
-  }, [settings.theme])
 
   /* ── Open top-level folders after first load ── */
   useEffect(() => {
@@ -186,6 +187,42 @@ function BookmarkEditorPage() {
       }
     }
   }, [tree])
+
+  useEffect(() => {
+    const targetId = locateBookmarkId.current
+    if (!targetId || locateHandled.current || tree.length === 0 || !treeRef.current) {
+      return
+    }
+
+    locateHandled.current = true
+
+    const location = findNodeLocation(tree, targetId)
+    if (!location) {
+      setStatus(t(lang, "editorLocateMissing"))
+      return
+    }
+
+    for (const folderId of location.ancestorFolderIds) {
+      treeRef.current.open(folderId)
+    }
+
+    setEditNode({
+      id: location.node.id,
+      title: location.node.title,
+      url: location.node.url ?? ""
+    })
+
+    requestAnimationFrame(() => {
+      treeRef.current?.select(location.node.id)
+      treeRef.current?.scrollTo(location.node.id, "center")
+    })
+
+    setStatus(
+      tf(lang, "editorLocateSuccess", {
+        title: location.node.title || t(lang, "emptyTitle")
+      })
+    )
+  }, [lang, tree])
 
   /* ── Measure body height for virtualized tree ── */
   useEffect(() => {
