@@ -2,7 +2,7 @@
   "name": "bookmark-flow-studio",
   "displayName": "书签流整理工坊",
   "version": "0.14.0",
-  "description": "Chrome 书签导出、AI 提示词、导入、对比与树形编辑工具",
+  "description": "书签导出、AI 提示词、导入、对比与树形编辑工具",
   "author": "",
   "scripts": {
     "dev": "plasmo dev",
@@ -24,6 +24,9 @@
     "typescript": "5.6.3"
   },
   "manifest": {
+    "default_locale": "zh_CN",
+    "name": "__MSG_extensionName__",
+    "description": "__MSG_extensionDescription__",
     "permissions": [
       "bookmarks",
       "downloads",
