@@ -5,7 +5,6 @@ import "../popup.css"
 import { FolderTreeView } from "./components/FolderTreeView"
 import { compareBookmarkSelections } from "./lib/compare-utils"
 import type { CompareResult } from "./lib/compare-utils"
-import { saveCompareViewerState } from "./lib/compare-viewer-state"
 import { createBookmark, downloadTextFile, getTree, openPopupWindow } from "./lib/chrome-api"
 import {
   buildFolderTree,
@@ -513,19 +512,7 @@ function IndexPopup() {
   }
 
   const openFloatingCompareViewer = async (): Promise<void> => {
-    if (!compareResult) {
-      setStatusByKey("floatingCompareNoData")
-      return
-    }
-
     try {
-      await saveCompareViewerState({
-        compareResult,
-        compareSetACount: compareSetA.length,
-        compareSetBCount: compareSetB.length,
-        createdAt: Date.now()
-      })
-
       await openPopupWindow(chrome.runtime.getURL("tabs/compare-viewer.html"))
       setStatusByKey("floatingCompareOpened")
     } catch (error) {
@@ -612,12 +599,20 @@ function IndexPopup() {
   }
 
   const setTheme = (theme: ThemeMode): void => {
-    setSettings((prev) => ({ ...prev, theme }))
+    setSettings((prev) => {
+      const next = { ...prev, theme }
+      void saveSettings(next)
+      return next
+    })
     applyTheme(theme)
   }
 
   const setLanguage = (language: AppLanguage): void => {
-    setSettings((prev) => ({ ...prev, language }))
+    setSettings((prev) => {
+      const next = { ...prev, language }
+      void saveSettings(next)
+      return next
+    })
   }
 
   const renderEntryList = (title: string, items: Array<{ title: string; url: string; path: string }>): JSX.Element => {
@@ -774,100 +769,8 @@ function IndexPopup() {
       {activePage === "compare" ? (
         <section className="card">
           <h2>{t(settings.language, "compareTitle")}</h2>
-          <p className="muted">{t(settings.language, "compareEditHint")}</p>
-          <p className="muted">{tf(settings.language, "compareSetCount", { a: compareSetA.length, b: compareSetB.length })}</p>
-
-          <div className="compare-set-editor-grid">
-            <div className="compare-set-editor">
-              <div className="settings-label">{t(settings.language, "compareSetAEditor")}</div>
-              <div className="folder-list">
-                <FolderTreeView
-                  nodes={folderTree}
-                  expandedFolderIds={expandedFolderIds}
-                  selectedFolderIds={compareSetA}
-                  onToggleExpanded={toggleExpanded}
-                  onToggleSelected={(id) => toggleCompareSetFolder("A", id)}
-                />
-              </div>
-              <div className="controls">
-                <button className="link-btn" onClick={() => selectAllCompareSet("A")}>{t(settings.language, "compareSetSelectAll")}</button>
-                <button className="link-btn" onClick={() => clearCompareSet("A")}>{t(settings.language, "compareSetClear")}</button>
-              </div>
-            </div>
-
-            <div className="compare-set-editor">
-              <div className="settings-label">{t(settings.language, "compareSetBEditor")}</div>
-              <div className="folder-list">
-                <FolderTreeView
-                  nodes={folderTree}
-                  expandedFolderIds={expandedFolderIds}
-                  selectedFolderIds={compareSetB}
-                  onToggleExpanded={toggleExpanded}
-                  onToggleSelected={(id) => toggleCompareSetFolder("B", id)}
-                />
-              </div>
-              <div className="controls">
-                <button className="link-btn" onClick={() => selectAllCompareSet("B")}>{t(settings.language, "compareSetSelectAll")}</button>
-                <button className="link-btn" onClick={() => clearCompareSet("B")}>{t(settings.language, "compareSetClear")}</button>
-              </div>
-            </div>
-          </div>
-
-          <div className="controls wrap">
-            <button className="link-btn" onClick={runSelectionCompare}>{t(settings.language, "runCompare")}</button>
-            <button className="link-btn" onClick={() => void openFloatingCompareViewer()}>{t(settings.language, "openFloatingCompare")}</button>
-            <button className="link-btn" onClick={clearCompareSets}>{t(settings.language, "clearCompare")}</button>
-          </div>
-
-          {compareResult ? (
-            <div className="compare-panel">
-              <div className="compare-stats-grid">
-                <div className="compare-stat">{t(settings.language, "compareStatAEntries")}: {compareResult.stats.aEntryCount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatBEntries")}: {compareResult.stats.bEntryCount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatTitleOnlyA")}: {compareResult.stats.titleOnlyACount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatTitleOnlyB")}: {compareResult.stats.titleOnlyBCount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatUrlOnlyA")}: {compareResult.stats.urlOnlyACount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatUrlOnlyB")}: {compareResult.stats.urlOnlyBCount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatTitleBoth")}: {compareResult.stats.titleBothCount}</div>
-                <div className="compare-stat">{t(settings.language, "compareStatUrlBoth")}: {compareResult.stats.urlBothCount}</div>
-                <div className="compare-stat wide">{t(settings.language, "compareStatConflict")}: {compareResult.stats.sameTitleDifferentUrlCount}</div>
-              </div>
-
-              <div className="controls wrap compare-filter-row">
-                <button className={`page-btn ${compareFilter === "title-only" ? "active" : ""}`} onClick={() => setCompareFilter("title-only")}>{t(settings.language, "compareFilterTitle")}</button>
-                <button className={`page-btn ${compareFilter === "url-only" ? "active" : ""}`} onClick={() => setCompareFilter("url-only")}>{t(settings.language, "compareFilterUrl")}</button>
-                <button className={`page-btn ${compareFilter === "title-url-conflict" ? "active" : ""}`} onClick={() => setCompareFilter("title-url-conflict")}>{t(settings.language, "compareFilterConflict")}</button>
-              </div>
-
-              <div className="compare-result-scroll">
-                {compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyAAll"), compareResult.titleOnlyA) : null}
-                {compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyBAll"), compareResult.titleOnlyB) : null}
-                {compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyAAll"), compareResult.urlOnlyA) : null}
-                {compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyBAll"), compareResult.urlOnlyB) : null}
-
-                {compareFilter === "title-url-conflict" ? (
-                  <div className="compare-block">
-                    <h3>{t(settings.language, "conflictAll")}</h3>
-                    {compareResult.sameTitleDifferentUrl.length ? (
-                      <ul className="compare-list">
-                        {compareResult.sameTitleDifferentUrl.map((item, index) => (
-                          <li key={`${item.title}-${index}`}>
-                            <div className="compare-item-title">{item.title}</div>
-                            <div className="compare-item-sub">{t(settings.language, "compareAUrls")}: {item.aEntries.map((entry) => entry.url).join(" | ")}</div>
-                            <div className="compare-item-sub">{t(settings.language, "compareBUrls")}: {item.bEntries.map((entry) => entry.url).join(" | ")}</div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted">{t(settings.language, "none")}</p>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <pre className="status">{t(settings.language, "noCompare")}</pre>
-          )}
+          <p className="muted">{t(settings.language, "compareFloatingWorkflowHint")}</p>
+          <button className="btn primary" onClick={() => void openFloatingCompareViewer()}>{t(settings.language, "compareOpenFloatingEntry")}</button>
         </section>
       ) : null}
 

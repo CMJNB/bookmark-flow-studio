@@ -35,6 +35,31 @@ function CompareSearchPage() {
   }, [])
 
   useEffect(() => {
+    const listener = (_changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== "local") {
+        return
+      }
+
+      void (async () => {
+        const loadedSettings = await loadSettings()
+        setSettings(loadedSettings)
+        applyTheme(loadedSettings.theme)
+
+        const state = await loadCompareViewerState()
+        if (!state) {
+          return
+        }
+
+        setEntriesA(state.compareResult.allEntriesA)
+        setEntriesB(state.compareResult.allEntriesB)
+      })()
+    }
+
+    chrome.storage.onChanged.addListener(listener)
+    return () => chrome.storage.onChanged.removeListener(listener)
+  }, [])
+
+  useEffect(() => {
     if (settings.theme !== "system") {
       return undefined
     }

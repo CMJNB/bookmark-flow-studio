@@ -1,28 +1,41 @@
 import { useEffect, useMemo, useState } from "react"
 
 import "./compare-viewer.css"
-import { buildCompareViewerRows } from "../lib/compare-utils"
-import type { CompareViewerRow } from "../lib/compare-utils"
-import { loadCompareViewerState } from "../lib/compare-viewer-state"
-import type { CompareStats } from "../lib/compare-utils"
-import { openPopupWindow } from "../lib/chrome-api"
+import { FolderTreeView } from "../components/FolderTreeView"
+import { buildCompareViewerRows, compareBookmarkSelections } from "../lib/compare-utils"
+import type { CompareResult, CompareStats, CompareViewerRow } from "../lib/compare-utils"
+import { saveCompareViewerState } from "../lib/compare-viewer-state"
+import { getTree, openPopupWindow } from "../lib/chrome-api"
+import {
+  buildFolderTree,
+  buildSelectedExportRoots,
+  flattenFolderTreeIds,
+  flattenNodes,
+  getDescendantFolderIds
+} from "../lib/bookmark-utils"
 import { applyTheme, defaultSettings, loadSettings } from "../lib/settings"
 import { t, tf } from "../lib/i18n"
+import type { BookmarkNode, FolderTreeNode } from "../types/bookmark"
 import type { AppSettings } from "../types/settings"
 
 type CompareFilter = "title-only" | "url-only" | "title-url-conflict"
 
 function CompareViewerPage() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  const [tree, setTree] = useState<BookmarkNode[]>([])
+  const [folderTree, setFolderTree] = useState<FolderTreeNode[]>([])
+  const [expandedFolderIds, setExpandedFolderIds] = useState<string[]>([])
+  const [compareSetA, setCompareSetA] = useState<string[]>([])
+  const [compareSetB, setCompareSetB] = useState<string[]>([])
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
   const [rows, setRows] = useState<CompareViewerRow[]>([])
   const [compareSetACount, setCompareSetACount] = useState(0)
   const [compareSetBCount, setCompareSetBCount] = useState(0)
   const [compareStats, setCompareStats] = useState<CompareStats | null>(null)
   const [createdAt, setCreatedAt] = useState<number | null>(null)
   const [filter, setFilter] = useState<CompareFilter>("title-only")
-  const [searchA, setSearchA] = useState("")
-  const [searchB, setSearchB] = useState("")
   const [loadError, setLoadError] = useState("")
+  const allNodes = useMemo(() => flattenNodes(tree), [tree])
 
   useEffect(() => {
     ;(async () => {
@@ -31,20 +44,32 @@ function CompareViewerPage() {
         setSettings(loadedSettings)
         applyTheme(loadedSettings.theme)
 
-        const state = await loadCompareViewerState()
-        if (!state) {
-          return
-        }
-
-        setCompareSetACount(state.compareSetACount)
-        setCompareSetBCount(state.compareSetBCount)
-        setCompareStats(state.compareResult.stats)
-        setCreatedAt(state.createdAt)
-        setRows(buildCompareViewerRows(state.compareResult))
+        const data = await getTree()
+        setTree(data)
+        const builtTree = buildFolderTree(data)
+        setFolderTree(builtTree)
+        setExpandedFolderIds(builtTree.map((item) => item.id))
       } catch (error) {
         setLoadError((error as Error).message)
       }
     })()
+  }, [])
+
+  useEffect(() => {
+    const listener = (_changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== "local") {
+        return
+      }
+
+      void (async () => {
+        const loadedSettings = await loadSettings()
+        setSettings(loadedSettings)
+        applyTheme(loadedSettings.theme)
+      })()
+    }
+
+    chrome.storage.onChanged.addListener(listener)
+    return () => chrome.storage.onChanged.removeListener(listener)
   }, [])
 
   useEffect(() => {
@@ -58,25 +83,7 @@ function CompareViewerPage() {
     return () => media.removeEventListener("change", listener)
   }, [settings.theme])
 
-  const filteredRows = useMemo(() => {
-    const scopedRows = rows.filter((row) => row.kind === filter)
-    const normalizedSearchA = searchA.trim().toLowerCase()
-    const normalizedSearchB = searchB.trim().toLowerCase()
-
-    if (!normalizedSearchA && !normalizedSearchB) {
-      return scopedRows
-    }
-
-    const matchesEntries = (items: CompareViewerRow["leftItems"], query: string): boolean => {
-      if (!query) {
-        return true
-      }
-
-      return items.some((item) => `${item.title} ${item.url} ${item.path}`.toLowerCase().includes(query))
-    }
-
-    return scopedRows.filter((row) => matchesEntries(row.leftItems, normalizedSearchA) && matchesEntries(row.rightItems, normalizedSearchB))
-  }, [filter, rows, searchA, searchB])
+  const filteredRows = useMemo(() => rows.filter((row) => row.kind === filter), [filter, rows])
 
   const rowKindLabel = (row: CompareViewerRow): string => {
     if (row.kind === "title-only") {
@@ -89,11 +96,83 @@ function CompareViewerPage() {
   }
 
   const openSearchPage = async (): Promise<void> => {
+    if (!compareResult) {
+      return
+    }
+
     try {
       await openPopupWindow(chrome.runtime.getURL("tabs/compare-search.html"), 1040, 760)
     } catch {
       // Ignore because user still has in-page compare view.
     }
+  }
+
+  const toggleExpanded = (id: string): void => {
+    setExpandedFolderIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]))
+  }
+
+  const toggleCompareSetFolder = (target: "A" | "B", id: string): void => {
+    const setState = target === "A" ? setCompareSetA : setCompareSetB
+    setState((prev) => {
+      const next = new Set(prev)
+      const cascadeIds = [id, ...getDescendantFolderIds(id, allNodes)]
+
+      if (next.has(id)) {
+        for (const targetId of cascadeIds) {
+          next.delete(targetId)
+        }
+      } else {
+        for (const targetId of cascadeIds) {
+          next.add(targetId)
+        }
+      }
+
+      return [...next]
+    })
+  }
+
+  const selectAllCompareSet = (target: "A" | "B"): void => {
+    const allFolderIds = flattenFolderTreeIds(folderTree)
+    if (target === "A") {
+      setCompareSetA(allFolderIds)
+      return
+    }
+    setCompareSetB(allFolderIds)
+  }
+
+  const clearCompareSet = (target: "A" | "B"): void => {
+    if (target === "A") {
+      setCompareSetA([])
+      return
+    }
+    setCompareSetB([])
+  }
+
+  const runSelectionCompare = async (): Promise<void> => {
+    const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
+    const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
+    const result = compareBookmarkSelections(rootsA, rootsB)
+
+    setCompareResult(result)
+    setRows(buildCompareViewerRows(result))
+    setCompareStats(result.stats)
+    setCompareSetACount(compareSetA.length)
+    setCompareSetBCount(compareSetB.length)
+    setCreatedAt(Date.now())
+
+    await saveCompareViewerState({
+      compareResult: result,
+      compareSetACount: compareSetA.length,
+      compareSetBCount: compareSetB.length,
+      createdAt: Date.now()
+    })
+  }
+
+  const clearCompare = (): void => {
+    setCompareResult(null)
+    setRows([])
+    setCompareStats(null)
+    setCreatedAt(null)
   }
 
   return (
@@ -113,7 +192,45 @@ function CompareViewerPage() {
         <button className={`page-btn ${filter === "title-only" ? "active" : ""}`} onClick={() => setFilter("title-only")}>{t(settings.language, "floatingCompareFilterTitleOnly")}</button>
         <button className={`page-btn ${filter === "url-only" ? "active" : ""}`} onClick={() => setFilter("url-only")}>{t(settings.language, "floatingCompareFilterUrlOnly")}</button>
         <button className={`page-btn ${filter === "title-url-conflict" ? "active" : ""}`} onClick={() => setFilter("title-url-conflict")}>{t(settings.language, "floatingCompareFilterConflict")}</button>
+        <button className="page-btn" onClick={() => void runSelectionCompare()}>{t(settings.language, "runCompare")}</button>
         <button className="page-btn" onClick={() => void openSearchPage()}>{t(settings.language, "floatingCompareOpenSearchPage")}</button>
+        <button className="page-btn" onClick={clearCompare}>{t(settings.language, "clearCompare")}</button>
+      </section>
+
+      <section className="compare-set-editor-grid">
+        <div className="compare-set-editor">
+          <div className="compare-viewer-column-title">{t(settings.language, "compareSetAEditor")}</div>
+          <div className="folder-list">
+            <FolderTreeView
+              nodes={folderTree}
+              expandedFolderIds={expandedFolderIds}
+              selectedFolderIds={compareSetA}
+              onToggleExpanded={toggleExpanded}
+              onToggleSelected={(id) => toggleCompareSetFolder("A", id)}
+            />
+          </div>
+          <div className="controls">
+            <button className="page-btn" onClick={() => selectAllCompareSet("A")}>{t(settings.language, "compareSetSelectAll")}</button>
+            <button className="page-btn" onClick={() => clearCompareSet("A")}>{t(settings.language, "compareSetClear")}</button>
+          </div>
+        </div>
+
+        <div className="compare-set-editor">
+          <div className="compare-viewer-column-title">{t(settings.language, "compareSetBEditor")}</div>
+          <div className="folder-list">
+            <FolderTreeView
+              nodes={folderTree}
+              expandedFolderIds={expandedFolderIds}
+              selectedFolderIds={compareSetB}
+              onToggleExpanded={toggleExpanded}
+              onToggleSelected={(id) => toggleCompareSetFolder("B", id)}
+            />
+          </div>
+          <div className="controls">
+            <button className="page-btn" onClick={() => selectAllCompareSet("B")}>{t(settings.language, "compareSetSelectAll")}</button>
+            <button className="page-btn" onClick={() => clearCompareSet("B")}>{t(settings.language, "compareSetClear")}</button>
+          </div>
+        </div>
       </section>
 
       {compareStats ? (
@@ -130,40 +247,11 @@ function CompareViewerPage() {
         </section>
       ) : null}
 
-      <section className="compare-viewer-search-grid">
-        <div className="compare-viewer-search-wrap">
-          <input
-            className="compare-viewer-search-input with-clear"
-            value={searchA}
-            onChange={(event) => setSearchA(event.target.value)}
-            placeholder={t(settings.language, "floatingCompareSearchA")}
-          />
-          {searchA ? (
-            <button className="search-clear-btn" onClick={() => setSearchA("")} aria-label={t(settings.language, "floatingCompareClearSearchA")}>
-              ×
-            </button>
-          ) : null}
-        </div>
-        <div className="compare-viewer-search-wrap">
-          <input
-            className="compare-viewer-search-input with-clear"
-            value={searchB}
-            onChange={(event) => setSearchB(event.target.value)}
-            placeholder={t(settings.language, "floatingCompareSearchB")}
-          />
-          {searchB ? (
-            <button className="search-clear-btn" onClick={() => setSearchB("")} aria-label={t(settings.language, "floatingCompareClearSearchB")}>
-              ×
-            </button>
-          ) : null}
-        </div>
-      </section>
-
       {loadError ? <section className="compare-viewer-empty">{tf(settings.language, "floatingCompareOpenFailed", { error: loadError })}</section> : null}
 
-      {!loadError && rows.length === 0 ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareEmpty")}</section> : null}
+      {!loadError && !compareResult ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareNoData")}</section> : null}
 
-      {!loadError && rows.length > 0 && filteredRows.length === 0 ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareNoFilteredRows")}</section> : null}
+      {!loadError && compareResult && filteredRows.length === 0 ? <section className="compare-viewer-empty">{t(settings.language, "floatingCompareNoFilteredRows")}</section> : null}
 
       {!loadError && filteredRows.length > 0 ? (
         <section className="compare-viewer-grid">
