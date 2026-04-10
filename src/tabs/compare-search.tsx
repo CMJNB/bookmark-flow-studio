@@ -5,44 +5,85 @@ import { CompareEntryList } from "../components/CompareEntryList"
 import { PageHeader } from "../components/PageHeader"
 import { SearchInput } from "../components/SearchInput"
 import { EmptyState } from "../components/EmptyState"
+import { OptionSelector } from "../components/OptionSelector"
+import { compareBookmarkSelections } from "../lib/compare-utils"
+import { getTree } from "../lib/chrome-api"
+import { buildSelectedExportRoots, flattenNodes } from "../lib/bookmark-utils"
 import { loadCompareViewerState } from "../lib/compare-viewer-state"
 import { useAppSettings } from "../lib/use-app-settings"
 import { useStorageListener } from "../lib/use-storage-listener"
 import { t, tf } from "../lib/i18n"
 import type { BookmarkEntry } from "../types/bookmark"
 
+type SortBy = "original" | "title-asc" | "title-desc" | "url-asc" | "url-desc"
+
+function sortEntries(entries: BookmarkEntry[], sortBy: SortBy): BookmarkEntry[] {
+  const sorted = [...entries]
+  switch (sortBy) {
+    case "title-asc":
+      sorted.sort((a, b) => (a.title || "").localeCompare(b.title || "", "zh-CN"))
+      break
+    case "title-desc":
+      sorted.sort((a, b) => (b.title || "").localeCompare(a.title || "", "zh-CN"))
+      break
+    case "url-asc":
+      sorted.sort((a, b) => a.url.localeCompare(b.url, "zh-CN"))
+      break
+    case "url-desc":
+      sorted.sort((a, b) => b.url.localeCompare(a.url, "zh-CN"))
+      break
+    case "original":
+    default:
+      break
+  }
+  return sorted
+}
+
 function CompareSearchPage() {
   const settings = useAppSettings()
   const [keyword, setKeyword] = useState("")
+  const [sortBy, setSortBy] = useState<SortBy>("original")
   const [entriesA, setEntriesA] = useState<BookmarkEntry[]>([])
   const [entriesB, setEntriesB] = useState<BookmarkEntry[]>([])
   const [loadError, setLoadError] = useState("")
   const [actionStatus, setActionStatus] = useState("")
 
-  useEffect(() => {
-    ;(async () => {
-      try {
-        const state = await loadCompareViewerState()
-        if (!state) {
-          return
-        }
-
-        setEntriesA(state.compareResult.allEntriesA)
-        setEntriesB(state.compareResult.allEntriesB)
-      } catch (error) {
-        setLoadError((error as Error).message)
+  const loadEntries = async (): Promise<void> => {
+    try {
+      const state = await loadCompareViewerState()
+      if (!state) {
+        return
       }
-    })()
+
+      const compareSetAIds = state.compareSetAIds ?? []
+      const compareSetBIds = state.compareSetBIds ?? []
+
+      if (compareSetAIds.length > 0 || compareSetBIds.length > 0) {
+        const latestTree = await getTree()
+        const latestNodes = flattenNodes(latestTree)
+
+        const rootsA = buildSelectedExportRoots(latestTree, compareSetAIds, latestNodes)
+        const rootsB = buildSelectedExportRoots(latestTree, compareSetBIds, latestNodes)
+        const latestResult = compareBookmarkSelections(rootsA, rootsB)
+
+        setEntriesA(latestResult.allEntriesA)
+        setEntriesB(latestResult.allEntriesB)
+        return
+      }
+
+      setEntriesA(state.compareResult.allEntriesA)
+      setEntriesB(state.compareResult.allEntriesB)
+    } catch (error) {
+      setLoadError((error as Error).message)
+    }
+  }
+
+  useEffect(() => {
+    void loadEntries()
   }, [])
 
   useStorageListener(async () => {
-    const state = await loadCompareViewerState()
-    if (!state) {
-      return
-    }
-
-    setEntriesA(state.compareResult.allEntriesA)
-    setEntriesB(state.compareResult.allEntriesB)
+    await loadEntries()
   })
 
   const normalizedKeyword = keyword.trim().toLowerCase()
@@ -55,8 +96,8 @@ function CompareSearchPage() {
     return `${entry.title} ${entry.url} ${entry.path}`.toLowerCase().includes(normalizedKeyword)
   }
 
-  const filteredA = useMemo(() => entriesA.filter(matchEntry), [entriesA, normalizedKeyword])
-  const filteredB = useMemo(() => entriesB.filter(matchEntry), [entriesB, normalizedKeyword])
+  const filteredA = useMemo(() => sortEntries(entriesA.filter(matchEntry), sortBy), [entriesA, normalizedKeyword, sortBy])
+  const filteredB = useMemo(() => sortEntries(entriesB.filter(matchEntry), sortBy), [entriesB, normalizedKeyword, sortBy])
 
   return (
     <main className="compare-viewer-app">
@@ -76,6 +117,19 @@ function CompareSearchPage() {
           language={settings.language}
         />
       </section>
+
+      <OptionSelector
+        label={t(settings.language, "floatingCompareSortLabel") || "排序方式"}
+        options={[
+          { value: "original", label: t(settings.language, "floatingCompareSortOriginal") || "原始", title: "原始顺序" },
+          { value: "title-asc", label: t(settings.language, "floatingCompareSortTitleAsc") || "标题 ↑", title: "按标题 A-Z" },
+          { value: "title-desc", label: t(settings.language, "floatingCompareSortTitleDesc") || "标题 ↓", title: "按标题 Z-A" },
+          { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc") || "URL ↑", title: "按URL A-Z" },
+          { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc") || "URL ↓", title: "按URL Z-A" }
+        ]}
+        value={sortBy}
+        onChange={setSortBy}
+      />
 
       {actionStatus ? <section className="compare-viewer-inline-status">{actionStatus}</section> : null}
 

@@ -283,8 +283,15 @@ button {
 .compare-viewer-entry-item {
   display: grid;
   gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--viewer-border);
   content-visibility: auto;
   contain-intrinsic-size: 0px 100px;
+}
+
+.compare-viewer-entry-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .compare-viewer-entry-title {
@@ -374,6 +381,27 @@ button {
 
 .compare-viewer-search-input::placeholder {
   color: var(--viewer-muted);
+}
+
+.compare-viewer-sort-controls {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.compare-viewer-sort-label {
+  font-size: 12px;
+  color: var(--viewer-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compare-viewer-sort-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 @media (max-width: 900px) {

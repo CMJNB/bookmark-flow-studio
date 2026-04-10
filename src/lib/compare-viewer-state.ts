@@ -7,6 +7,8 @@ export type CompareViewerState = {
   compareSetACount: number
   compareSetBCount: number
   createdAt: number
+  compareSetAIds?: string[]
+  compareSetBIds?: string[]
 }
 
 export async function saveCompareViewerState(state: CompareViewerState): Promise<void> {

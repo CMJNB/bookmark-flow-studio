@@ -6,10 +6,11 @@ import { CompareSetEditor } from "../components/CompareSetEditor"
 import { PageHeader } from "../components/PageHeader"
 import { TabButton } from "../components/TabButton"
 import { EmptyState } from "../components/EmptyState"
+import { OptionSelector } from "../components/OptionSelector"
 import { buildCompareViewerRows, compareBookmarkSelections } from "../lib/compare-utils"
 import type { CompareResult, CompareStats, CompareViewerRow } from "../lib/compare-utils"
 import { saveCompareViewerState } from "../lib/compare-viewer-state"
-import { openPopupWindow } from "../lib/chrome-api"
+import { getTree, openPopupWindow } from "../lib/chrome-api"
 import {
   buildSelectedExportRoots,
   flattenFolderTreeIds,
@@ -23,6 +24,44 @@ import type { FolderTreeNode } from "../types/bookmark"
 
 type CompareFilter = "title-only" | "url-only" | "url-title-change" | "title-url-conflict"
 
+type RowSortBy = "original" | "label-asc" | "label-desc" | "url-asc" | "url-desc" | "count-asc" | "count-desc"
+
+function sortViewerRows(rows: CompareViewerRow[], sortBy: RowSortBy): CompareViewerRow[] {
+  const sorted = [...rows]
+  switch (sortBy) {
+    case "label-asc":
+      sorted.sort((a, b) => (a.label || "").localeCompare(b.label || "", "zh-CN"))
+      break
+    case "label-desc":
+      sorted.sort((a, b) => (b.label || "").localeCompare(a.label || "", "zh-CN"))
+      break
+    case "url-asc":
+      sorted.sort((a, b) => {
+        const aUrl = (a.leftItems[0]?.url || a.rightItems[0]?.url) || ""
+        const bUrl = (b.leftItems[0]?.url || b.rightItems[0]?.url) || ""
+        return aUrl.localeCompare(bUrl, "zh-CN")
+      })
+      break
+    case "url-desc":
+      sorted.sort((a, b) => {
+        const aUrl = (a.leftItems[0]?.url || a.rightItems[0]?.url) || ""
+        const bUrl = (b.leftItems[0]?.url || b.rightItems[0]?.url) || ""
+        return bUrl.localeCompare(aUrl, "zh-CN")
+      })
+      break
+    case "count-asc":
+      sorted.sort((a, b) => (a.leftItems.length + a.rightItems.length) - (b.leftItems.length + b.rightItems.length))
+      break
+    case "count-desc":
+      sorted.sort((a, b) => (b.leftItems.length + b.rightItems.length) - (a.leftItems.length + a.rightItems.length))
+      break
+    case "original":
+    default:
+      break
+  }
+  return sorted
+}
+
 function CompareViewerPage() {
   const settings = useAppSettings()
   const { tree, folderTree, expandedFolderIds, setExpandedFolderIds, loadError } = useBookmarkTree()
@@ -35,10 +74,11 @@ function CompareViewerPage() {
   const [compareStats, setCompareStats] = useState<CompareStats | null>(null)
   const [createdAt, setCreatedAt] = useState<number | null>(null)
   const [filter, setFilter] = useState<CompareFilter>("title-only")
+  const [rowSortBy, setRowSortBy] = useState<RowSortBy>("original")
   const [actionStatus, setActionStatus] = useState("")
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
 
-  const filteredRows = useMemo(() => rows.filter((row) => row.kind === filter), [filter, rows])
+  const filteredRows = useMemo(() => sortViewerRows(rows.filter((row) => row.kind === filter), rowSortBy), [filter, rows, rowSortBy])
 
   const rowKindLabel = (row: CompareViewerRow): string => {
     if (row.kind === "title-only") {
@@ -112,8 +152,11 @@ function CompareViewerPage() {
 
   const runSelectionCompare = async (): Promise<void> => {
     try {
-      const rootsA = buildSelectedExportRoots(tree, compareSetA, allNodes)
-      const rootsB = buildSelectedExportRoots(tree, compareSetB, allNodes)
+      const latestTree = await getTree()
+      const latestNodes = flattenNodes(latestTree)
+
+      const rootsA = buildSelectedExportRoots(latestTree, compareSetA, latestNodes)
+      const rootsB = buildSelectedExportRoots(latestTree, compareSetB, latestNodes)
       const result = compareBookmarkSelections(rootsA, rootsB)
 
       setCompareResult(result)
@@ -127,7 +170,9 @@ function CompareViewerPage() {
         compareResult: result,
         compareSetACount: compareSetA.length,
         compareSetBCount: compareSetB.length,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        compareSetAIds: compareSetA,
+        compareSetBIds: compareSetB
       })
     } catch (error) {
       setActionStatus((error as Error).message)
@@ -172,6 +217,23 @@ function CompareViewerPage() {
         <button className="page-btn" onClick={() => void openSearchPage()}>{t(settings.language, "floatingCompareOpenSearchPage")}</button>
         <button className="page-btn" onClick={clearCompare}>{t(settings.language, "clearCompare")}</button>
       </section>
+
+      {!loadError && compareResult ? (
+        <OptionSelector
+          label={t(settings.language, "floatingCompareRowSortLabel") || "结果排序"}
+          options={[
+            { value: "original", label: t(settings.language, "floatingCompareSortOriginal") || "原始", title: "按匹配顺序" },
+            { value: "label-asc", label: t(settings.language, "floatingCompareSortLabelAsc") || "标题 ↑", title: "按条目标题 A-Z" },
+            { value: "label-desc", label: t(settings.language, "floatingCompareSortLabelDesc") || "标题 ↓", title: "按条目标题 Z-A" },
+            { value: "url-asc", label: t(settings.language, "floatingCompareSortUrlAsc") || "URL ↑", title: "按条目URL A-Z" },
+            { value: "url-desc", label: t(settings.language, "floatingCompareSortUrlDesc") || "URL ↓", title: "按条目URL Z-A" },
+            { value: "count-asc", label: t(settings.language, "floatingCompareSortCountAsc") || "数量 ↑", title: "按差异项数少→多" },
+            { value: "count-desc", label: t(settings.language, "floatingCompareSortCountDesc") || "数量 ↓", title: "按差异项数多→少" }
+          ]}
+          value={rowSortBy}
+          onChange={setRowSortBy}
+        />
+      ) : null}
 
       {actionStatus ? <section className="compare-viewer-inline-status">{actionStatus}</section> : null}
 
