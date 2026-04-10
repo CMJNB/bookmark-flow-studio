@@ -1,6 +1,6 @@
 :root {
-  --popup-width: 420px;
-  --popup-height: 560px;
+  --popup-width: 460px;
+  --popup-height: 600px;
   --bg: #f5f7fb;
   --bg-accent-a: #eef2ff;
   --bg-accent-b: #ecfeff;
@@ -355,6 +355,25 @@ input[type="file"] {
   border-radius: 10px;
   background: var(--surface-soft);
   padding: 10px;
+}
+
+.compare-set-editor-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.compare-set-editor {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 8px;
+}
+
+.compare-set-editor .folder-list {
+  max-height: 240px;
+  overflow: auto;
 }
 
 .compare-filter-row {

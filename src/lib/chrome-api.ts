@@ -51,3 +51,25 @@ export function createBookmark(input: CreateBookmarkInput): Promise<BookmarkNode
     })
   })
 }
+
+export function openPopupWindow(url: string, width = 1180, height = 820): Promise<void> {
+  return new Promise((resolve, reject) => {
+    chrome.windows.create(
+      {
+        url,
+        type: "popup",
+        width,
+        height,
+        focused: true
+      },
+      () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message))
+          return
+        }
+
+        resolve()
+      }
+    )
+  })
+}

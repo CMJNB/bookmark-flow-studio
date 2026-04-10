@@ -5,7 +5,8 @@ import "../popup.css"
 import { FolderTreeView } from "./components/FolderTreeView"
 import { compareBookmarkSelections } from "./lib/compare-utils"
 import type { CompareResult } from "./lib/compare-utils"
-import { createBookmark, downloadTextFile, getTree } from "./lib/chrome-api"
+import { saveCompareViewerState } from "./lib/compare-viewer-state"
+import { createBookmark, downloadTextFile, getTree, openPopupWindow } from "./lib/chrome-api"
 import {
   buildFolderTree,
   buildSelectedExportRoots,
@@ -34,7 +35,7 @@ import {
 import type { BookmarkNode, ExportNode, FolderTreeNode, PageKey } from "./types/bookmark"
 import type { AppConfigSnapshot, AppLanguage, AppSettings, PromptTemplateState, ThemeMode } from "./types/settings"
 
-type CompareFilter = "all" | "title-only" | "url-only" | "title-url-conflict"
+type CompareFilter = "title-only" | "url-only" | "title-url-conflict"
 
 async function createRecursive(parentId: string, item: ExportNode): Promise<void> {
   const title = typeof item.title === "string" ? item.title : "Untitled"
@@ -70,7 +71,7 @@ function IndexPopup() {
   const [compareSetA, setCompareSetA] = useState<string[]>([])
   const [compareSetB, setCompareSetB] = useState<string[]>([])
   const [compareResult, setCompareResult] = useState<CompareResult | null>(null)
-  const [compareFilter, setCompareFilter] = useState<CompareFilter>("all")
+  const [compareFilter, setCompareFilter] = useState<CompareFilter>("title-only")
   const [slimMode, setSlimMode] = useState(true)
   const [autoBackup, setAutoBackup] = useState(true)
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
@@ -115,6 +116,14 @@ function IndexPopup() {
     setTemplateContentDraft(target.content)
   }
 
+  const reloadBookmarkTree = async (): Promise<void> => {
+    const data = await getTree()
+    setTree(data)
+    const builtTree = buildFolderTree(data)
+    setFolderTree(builtTree)
+    setExpandedFolderIds(builtTree.map((item) => item.id))
+  }
+
   useEffect(() => {
     ;(async () => {
       try {
@@ -134,11 +143,7 @@ function IndexPopup() {
           setTemplateContentDraft(firstEditTemplate.content)
         }
 
-        const data = await getTree()
-        setTree(data)
-        const builtTree = buildFolderTree(data)
-        setFolderTree(builtTree)
-        setExpandedFolderIds(builtTree.map((item) => item.id))
+        await reloadBookmarkTree()
       } catch (error) {
         setStatusByKey("statusLoadBookmarksFailed", { error: (error as Error).message })
       }
@@ -392,6 +397,8 @@ function IndexPopup() {
         await createRecursive(folder.id, item)
       }
 
+      await reloadBookmarkTree()
+
       setStatusByKey("statusImportCompleted", { source: sourceName, folder: folder.title, count: items.length })
     } catch (error) {
       setStatusByKey("statusImportFailed", { error: (error as Error).message })
@@ -454,14 +461,41 @@ function IndexPopup() {
     setExpandedFolderIds([])
   }
 
-  const saveSelectionAsA = (): void => {
-    setCompareSetA([...new Set(selectedFolderIds)])
-    setStatusByKey("statusSelectionSavedA")
+  const toggleCompareSetFolder = (target: "A" | "B", id: string): void => {
+    const setState = target === "A" ? setCompareSetA : setCompareSetB
+    setState((prev) => {
+      const next = new Set(prev)
+      const cascadeIds = [id, ...getDescendantFolderIds(id, allNodes)]
+
+      if (next.has(id)) {
+        for (const targetId of cascadeIds) {
+          next.delete(targetId)
+        }
+      } else {
+        for (const targetId of cascadeIds) {
+          next.add(targetId)
+        }
+      }
+
+      return [...next]
+    })
   }
 
-  const saveSelectionAsB = (): void => {
-    setCompareSetB([...new Set(selectedFolderIds)])
-    setStatusByKey("statusSelectionSavedB")
+  const selectAllCompareSet = (target: "A" | "B"): void => {
+    const allFolderIds = flattenFolderTreeIds(folderTree)
+    if (target === "A") {
+      setCompareSetA(allFolderIds)
+      return
+    }
+    setCompareSetB(allFolderIds)
+  }
+
+  const clearCompareSet = (target: "A" | "B"): void => {
+    if (target === "A") {
+      setCompareSetA([])
+      return
+    }
+    setCompareSetB([])
   }
 
   const runSelectionCompare = (): void => {
@@ -476,6 +510,27 @@ function IndexPopup() {
     setCompareSetB([])
     setCompareResult(null)
     setStatusByKey("statusCompareCleared")
+  }
+
+  const openFloatingCompareViewer = async (): Promise<void> => {
+    if (!compareResult) {
+      setStatusByKey("floatingCompareNoData")
+      return
+    }
+
+    try {
+      await saveCompareViewerState({
+        compareResult,
+        compareSetACount: compareSetA.length,
+        compareSetBCount: compareSetB.length,
+        createdAt: Date.now()
+      })
+
+      await openPopupWindow(chrome.runtime.getURL("tabs/compare-viewer.html"))
+      setStatusByKey("floatingCompareOpened")
+    } catch (error) {
+      setStatusByKey("floatingCompareOpenFailed", { error: (error as Error).message })
+    }
   }
 
   const saveAppSettings = async (): Promise<void> => {
@@ -719,12 +774,48 @@ function IndexPopup() {
       {activePage === "compare" ? (
         <section className="card">
           <h2>{t(settings.language, "compareTitle")}</h2>
-          <p className="muted">{t(settings.language, "compareHint")}</p>
+          <p className="muted">{t(settings.language, "compareEditHint")}</p>
           <p className="muted">{tf(settings.language, "compareSetCount", { a: compareSetA.length, b: compareSetB.length })}</p>
+
+          <div className="compare-set-editor-grid">
+            <div className="compare-set-editor">
+              <div className="settings-label">{t(settings.language, "compareSetAEditor")}</div>
+              <div className="folder-list">
+                <FolderTreeView
+                  nodes={folderTree}
+                  expandedFolderIds={expandedFolderIds}
+                  selectedFolderIds={compareSetA}
+                  onToggleExpanded={toggleExpanded}
+                  onToggleSelected={(id) => toggleCompareSetFolder("A", id)}
+                />
+              </div>
+              <div className="controls">
+                <button className="link-btn" onClick={() => selectAllCompareSet("A")}>{t(settings.language, "compareSetSelectAll")}</button>
+                <button className="link-btn" onClick={() => clearCompareSet("A")}>{t(settings.language, "compareSetClear")}</button>
+              </div>
+            </div>
+
+            <div className="compare-set-editor">
+              <div className="settings-label">{t(settings.language, "compareSetBEditor")}</div>
+              <div className="folder-list">
+                <FolderTreeView
+                  nodes={folderTree}
+                  expandedFolderIds={expandedFolderIds}
+                  selectedFolderIds={compareSetB}
+                  onToggleExpanded={toggleExpanded}
+                  onToggleSelected={(id) => toggleCompareSetFolder("B", id)}
+                />
+              </div>
+              <div className="controls">
+                <button className="link-btn" onClick={() => selectAllCompareSet("B")}>{t(settings.language, "compareSetSelectAll")}</button>
+                <button className="link-btn" onClick={() => clearCompareSet("B")}>{t(settings.language, "compareSetClear")}</button>
+              </div>
+            </div>
+          </div>
+
           <div className="controls wrap">
-            <button className="link-btn" onClick={saveSelectionAsA}>{t(settings.language, "saveAsA")}</button>
-            <button className="link-btn" onClick={saveSelectionAsB}>{t(settings.language, "saveAsB")}</button>
             <button className="link-btn" onClick={runSelectionCompare}>{t(settings.language, "runCompare")}</button>
+            <button className="link-btn" onClick={() => void openFloatingCompareViewer()}>{t(settings.language, "openFloatingCompare")}</button>
             <button className="link-btn" onClick={clearCompareSets}>{t(settings.language, "clearCompare")}</button>
           </div>
 
@@ -743,19 +834,18 @@ function IndexPopup() {
               </div>
 
               <div className="controls wrap compare-filter-row">
-                <button className={`page-btn ${compareFilter === "all" ? "active" : ""}`} onClick={() => setCompareFilter("all")}>{t(settings.language, "compareFilterAll")}</button>
                 <button className={`page-btn ${compareFilter === "title-only" ? "active" : ""}`} onClick={() => setCompareFilter("title-only")}>{t(settings.language, "compareFilterTitle")}</button>
                 <button className={`page-btn ${compareFilter === "url-only" ? "active" : ""}`} onClick={() => setCompareFilter("url-only")}>{t(settings.language, "compareFilterUrl")}</button>
                 <button className={`page-btn ${compareFilter === "title-url-conflict" ? "active" : ""}`} onClick={() => setCompareFilter("title-url-conflict")}>{t(settings.language, "compareFilterConflict")}</button>
               </div>
 
               <div className="compare-result-scroll">
-                {compareFilter === "all" || compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyAAll"), compareResult.titleOnlyA) : null}
-                {compareFilter === "all" || compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyBAll"), compareResult.titleOnlyB) : null}
-                {compareFilter === "all" || compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyAAll"), compareResult.urlOnlyA) : null}
-                {compareFilter === "all" || compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyBAll"), compareResult.urlOnlyB) : null}
+                {compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyAAll"), compareResult.titleOnlyA) : null}
+                {compareFilter === "title-only" ? renderEntryList(t(settings.language, "titleOnlyBAll"), compareResult.titleOnlyB) : null}
+                {compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyAAll"), compareResult.urlOnlyA) : null}
+                {compareFilter === "url-only" ? renderEntryList(t(settings.language, "urlOnlyBAll"), compareResult.urlOnlyB) : null}
 
-                {compareFilter === "all" || compareFilter === "title-url-conflict" ? (
+                {compareFilter === "title-url-conflict" ? (
                   <div className="compare-block">
                     <h3>{t(settings.language, "conflictAll")}</h3>
                     {compareResult.sameTitleDifferentUrl.length ? (
@@ -763,8 +853,8 @@ function IndexPopup() {
                         {compareResult.sameTitleDifferentUrl.map((item, index) => (
                           <li key={`${item.title}-${index}`}>
                             <div className="compare-item-title">{item.title}</div>
-                            <div className="compare-item-sub">{t(settings.language, "compareAUrls")}: {item.aUrls.join(" | ")}</div>
-                            <div className="compare-item-sub">{t(settings.language, "compareBUrls")}: {item.bUrls.join(" | ")}</div>
+                            <div className="compare-item-sub">{t(settings.language, "compareAUrls")}: {item.aEntries.map((entry) => entry.url).join(" | ")}</div>
+                            <div className="compare-item-sub">{t(settings.language, "compareBUrls")}: {item.bEntries.map((entry) => entry.url).join(" | ")}</div>
                           </li>
                         ))}
                       </ul>

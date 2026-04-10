@@ -14,12 +14,24 @@ export type CompareStats = {
 
 export type SameTitleDiffItem = {
   title: string
-  aUrls: string[]
-  bUrls: string[]
+  aEntries: BookmarkEntry[]
+  bEntries: BookmarkEntry[]
+}
+
+export type CompareViewerRowKind = "title-only" | "url-only" | "title-url-conflict"
+
+export type CompareViewerRow = {
+  id: string
+  kind: CompareViewerRowKind
+  label: string
+  leftItems: BookmarkEntry[]
+  rightItems: BookmarkEntry[]
 }
 
 export type CompareResult = {
   stats: CompareStats
+  allEntriesA: BookmarkEntry[]
+  allEntriesB: BookmarkEntry[]
   titleOnlyA: BookmarkEntry[]
   titleOnlyB: BookmarkEntry[]
   urlOnlyA: BookmarkEntry[]
@@ -29,6 +41,22 @@ export type CompareResult = {
 
 function normalizeText(value: string): string {
   return value.trim().toLowerCase()
+}
+
+function sortEntries(entries: BookmarkEntry[]): BookmarkEntry[] {
+  return [...entries].sort((left, right) => {
+    const titleCompare = left.title.localeCompare(right.title, "zh-CN")
+    if (titleCompare !== 0) {
+      return titleCompare
+    }
+
+    const urlCompare = left.url.localeCompare(right.url, "en")
+    if (urlCompare !== 0) {
+      return urlCompare
+    }
+
+    return left.path.localeCompare(right.path, "zh-CN")
+  })
 }
 
 function collectBookmarkEntries(nodes: BookmarkNode[]): BookmarkEntry[] {
@@ -89,6 +117,10 @@ function dedupeEntries(entries: BookmarkEntry[]): BookmarkEntry[] {
   return [...unique.values()]
 }
 
+function countUniqueTitles(entries: BookmarkEntry[]): number {
+  return new Set(entries.map((entry) => normalizeText(entry.title))).size
+}
+
 export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: BookmarkNode[]): CompareResult {
   const aEntries = collectBookmarkEntries(aRoots)
   const bEntries = collectBookmarkEntries(bRoots)
@@ -118,13 +150,13 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
       const sampleTitle = (aTitleMap.get(titleKey)?.[0]?.title || bTitleMap.get(titleKey)?.[0]?.title || titleKey).trim()
       sameTitleDifferentUrl.push({
         title: sampleTitle || "(空标题)",
-        aUrls: [...aUrls].sort(),
-        bUrls: [...bUrls].sort()
+        aEntries: sortEntries(aTitleMap.get(titleKey) ?? []),
+        bEntries: sortEntries(bTitleMap.get(titleKey) ?? [])
       })
     }
   }
 
-  const titleOnlyAEntries = dedupeEntries(
+  const rawTitleOnlyAEntries = dedupeEntries(
     titleOnlyA.flatMap((key) =>
       (aTitleMap.get(key) ?? []).map((entry) => ({
         title: entry.title,
@@ -134,7 +166,9 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
     )
   )
 
-  const titleOnlyBEntries = dedupeEntries(
+  const titleOnlyAEntries = rawTitleOnlyAEntries.filter((entry) => !bUrlSet.has(normalizeText(entry.url)))
+
+  const rawTitleOnlyBEntries = dedupeEntries(
     titleOnlyB.flatMap((key) =>
       (bTitleMap.get(key) ?? []).map((entry) => ({
         title: entry.title,
@@ -143,6 +177,8 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
       }))
     )
   )
+
+  const titleOnlyBEntries = rawTitleOnlyBEntries.filter((entry) => !aUrlSet.has(normalizeText(entry.url)))
 
   const urlOnlyAEntries = dedupeEntries(
     aEntries.filter((entry) => !bUrlSet.has(normalizeText(entry.url)))
@@ -156,18 +192,76 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
     stats: {
       aEntryCount: aEntries.length,
       bEntryCount: bEntries.length,
-      titleOnlyACount: titleOnlyA.length,
-      titleOnlyBCount: titleOnlyB.length,
+      titleOnlyACount: countUniqueTitles(titleOnlyAEntries),
+      titleOnlyBCount: countUniqueTitles(titleOnlyBEntries),
       titleBothCount: titleBoth.length,
       urlOnlyACount: urlOnlyA.length,
       urlOnlyBCount: urlOnlyB.length,
       urlBothCount: urlBoth.length,
       sameTitleDifferentUrlCount: sameTitleDifferentUrl.length
     },
+    allEntriesA: dedupeEntries(aEntries),
+    allEntriesB: dedupeEntries(bEntries),
     titleOnlyA: titleOnlyAEntries,
     titleOnlyB: titleOnlyBEntries,
     urlOnlyA: urlOnlyAEntries,
     urlOnlyB: urlOnlyBEntries,
     sameTitleDifferentUrl
   }
+}
+
+function buildLeftOnlyRows(kind: CompareViewerRowKind, entries: BookmarkEntry[], groupBy: "title" | "url"): CompareViewerRow[] {
+  const grouped = new Map<string, BookmarkEntry[]>()
+
+  for (const entry of entries) {
+    const key = groupBy === "title" ? normalizeText(entry.title) : normalizeText(entry.url)
+    const list = grouped.get(key) ?? []
+    list.push(entry)
+    grouped.set(key, list)
+  }
+
+  return [...grouped.entries()].map(([key, items]) => ({
+    id: `${kind}-left-${key}`,
+    kind,
+    label: groupBy === "title" ? items[0]?.title || "" : items[0]?.url || "",
+    leftItems: sortEntries(items),
+    rightItems: []
+  }))
+}
+
+function buildRightOnlyRows(kind: CompareViewerRowKind, entries: BookmarkEntry[], groupBy: "title" | "url"): CompareViewerRow[] {
+  const grouped = new Map<string, BookmarkEntry[]>()
+
+  for (const entry of entries) {
+    const key = groupBy === "title" ? normalizeText(entry.title) : normalizeText(entry.url)
+    const list = grouped.get(key) ?? []
+    list.push(entry)
+    grouped.set(key, list)
+  }
+
+  return [...grouped.entries()].map(([key, items]) => ({
+    id: `${kind}-right-${key}`,
+    kind,
+    label: groupBy === "title" ? items[0]?.title || "" : items[0]?.url || "",
+    leftItems: [],
+    rightItems: sortEntries(items)
+  }))
+}
+
+export function buildCompareViewerRows(result: CompareResult): CompareViewerRow[] {
+  const rows = [
+    ...buildLeftOnlyRows("title-only", result.titleOnlyA, "title"),
+    ...buildRightOnlyRows("title-only", result.titleOnlyB, "title"),
+    ...buildLeftOnlyRows("url-only", result.urlOnlyA, "url"),
+    ...buildRightOnlyRows("url-only", result.urlOnlyB, "url"),
+    ...result.sameTitleDifferentUrl.map((item, index) => ({
+      id: `title-url-conflict-${normalizeText(item.title)}-${index}`,
+      kind: "title-url-conflict" as const,
+      label: item.title,
+      leftItems: sortEntries(item.aEntries),
+      rightItems: sortEntries(item.bEntries)
+    }))
+  ]
+
+  return rows.sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
 }
