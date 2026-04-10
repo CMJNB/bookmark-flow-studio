@@ -1,55 +1,94 @@
-# 书签结构化整理扩展（Plasmo + Manifest V3）
+# Bookmark Flow Studio
 
-## 功能
+English | [简体中文](README.zh-CN.md)
 
-- 读取 Chrome 全量书签树
-- 支持勾选指定收藏夹（文件夹）导出
-- 一键导出 JSON（完整模式 / 精简模式）
-- 生成可直接喂给 AI 的分类提示词（包含 YAML 书签数据）
-- 导入 AI 整理后的 JSON 并重建文件夹与书签
-- 导入前提醒，并支持自动备份当前书签
+A Chrome extension built with Plasmo for bookmark export, AI prompt generation, import, comparison, and tree-style editing.
 
-## 本地开发
+## Key Features
 
-1. 安装依赖
+- Read the full Chrome bookmark tree.
+- Select folders and export JSON in full/slim modes.
+- Generate AI prompts with YAML bookmark data.
+- Manage multiple prompt templates and switch active template.
+- Generate hash-mode prompts and resolve hash-based imports.
+- Import JSON/YAML to rebuild bookmark structures.
+- Optional backup before import.
+- A/B selection comparison in a floating viewer.
+- Global compare search page with filtering and sorting.
+- Bookmark editor page with tree editing:
+  - Search and locate
+  - Open bookmark links safely
+  - Create folder/bookmark
+  - Multi-select, drag and drop
+  - Copy/cut/paste and batch operations
+- Bilingual UI (zh-CN / en-US) and theme support (light/dark/system).
 
-   npm install
+## Tech Stack
 
-2. 开发模式
+- Plasmo (Manifest V3)
+- React 18 + TypeScript
+- react-arborist (tree editor)
+- yaml
 
-   npm run dev
+## Development
 
-3. 打开 Chrome 扩展页 chrome://extensions/，加载 Plasmo 生成目录（通常为 build/chrome-mv3-dev）
+1. Install dependencies
 
-## 构建
+    ```bash
+    npm install
+    ```
 
+2. Start development build
+
+    ```bash
+    npm run dev
+    ```
+
+3. Open `chrome://extensions/`, enable Developer Mode, then load the generated directory (usually `build/chrome-mv3-dev`).
+
+## Build and Package
+
+Build production assets:
+
+```bash
 npm run build
+```
 
-构建产物通常在 build/chrome-mv3-prod。
+Create extension package:
 
-## AI 导入 JSON 结构建议
+```bash
+npm run package
+```
 
-可以是数组结构：
+## Permissions
 
+- `bookmarks`
+- `downloads`
+- `storage`
+
+## Import Data Format
+
+Array form:
+
+```json
 [
   {
-    "title": "技术",
-    "children": [
-      { "title": "MDN", "url": "https://developer.mozilla.org" }
-    ]
+    "title": "Tech",
+    "children": [{ "title": "MDN", "url": "https://developer.mozilla.org" }]
   }
 ]
+```
 
-也可以是对象结构（带 children）：
+Object form with `children`:
 
+```json
 {
   "title": "Root",
-  "children": [
-    { "title": "Google", "url": "https://www.google.com" }
-  ]
+  "children": [{ "title": "Google", "url": "https://www.google.com" }]
 }
+```
 
-## 提示
+## Notes
 
-- 为避免误操作，导入会创建一个新的根目录，例如 AI 整理导入 2026/04/10 13:30:00。
-- 若开启自动备份，会先下载一份完整书签 JSON 备份文件。
+- Import creates a new root folder to avoid destructive overwrite.
+- If auto backup is enabled, a full bookmark JSON backup is downloaded before import.

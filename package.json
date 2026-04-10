@@ -1,8 +1,8 @@
 {
-  "name": "bookmark-structurer-plasmo",
-  "displayName": "书签结构化整理",
+  "name": "bookmark-flow-studio",
+  "displayName": "书签流整理工坊",
   "version": "0.14.0",
-  "description": "Chrome 书签结构化导出、AI 提示词生成与导入工具",
+  "description": "Chrome 书签导出、AI 提示词、导入、对比与树形编辑工具",
   "author": "",
   "scripts": {
     "dev": "plasmo dev",
