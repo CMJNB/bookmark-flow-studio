@@ -12,9 +12,13 @@ export function getTree(): Promise<BookmarkNode[]> {
   })
 }
 
-export function downloadTextFile(fileName: string, content: string): Promise<void> {
+export function downloadTextFile(
+  fileName: string,
+  content: string,
+  mimeType = "text/plain;charset=utf-8"
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
+    const blob = new Blob([content], { type: mimeType })
     const url = URL.createObjectURL(blob)
 
     chrome.downloads.download(

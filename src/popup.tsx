@@ -234,7 +234,7 @@ function IndexPopup() {
     const stamp = formatDateForFileName(new Date())
     const mode = slimMode ? "slim" : "full"
     const fileName = `${backup ? "bookmarks-backup" : "bookmarks-export"}-${mode}-${stamp}.json`
-    await downloadTextFile(fileName, json)
+    await downloadTextFile(fileName, json, "application/json;charset=utf-8")
     setStatusByKey("statusExportSuccess", { fileName, count: roots.length })
   }
 
@@ -661,7 +661,11 @@ function IndexPopup() {
     }
 
     const stamp = formatDateForFileName(new Date())
-    await downloadTextFile(`bookmark-structurer-config-${stamp}.json`, JSON.stringify(snapshot, null, 2))
+    await downloadTextFile(
+      `bookmark-structurer-config-${stamp}.json`,
+      JSON.stringify(snapshot, null, 2),
+      "application/json;charset=utf-8"
+    )
     setStatusByKey("statusConfigExported")
   }
 
