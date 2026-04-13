@@ -1,0 +1,59 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro"
+
+const repo = "https://github.com/CMJNB/bookmark-flow-studio"
+---
+
+<BaseLayout title="书签流整理工坊 | Bookmark Flow Studio">
+  <main class="shell">
+    <section class="hero panel">
+      <p class="eyebrow">Chrome Extension</p>
+      <h1>书签流整理工坊</h1>
+      <p class="lead">
+        导出、导入、A/B 对比、时间修复、模板化 AI 提示词、树形批量编辑，整合为一条高效工作流。
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-strong" href={repo} target="_blank" rel="noreferrer">查看仓库</a>
+        <a class="btn" href={`${repo}/blob/main/README.zh-CN.md`} target="_blank" rel="noreferrer">中文文档</a>
+        <a class="btn" href={`${repo}/blob/main/README.md`} target="_blank" rel="noreferrer">English Docs</a>
+      </div>
+    </section>
+
+    <section class="cards">
+      <article class="panel card">
+        <h2>核心能力</h2>
+        <ul>
+          <li>按文件夹导出 JSON（完整/精简）</li>
+          <li>JSON/YAML 导入与自动备份</li>
+          <li>A/B 对比、筛选与全局搜索</li>
+          <li>标准 HTML 时间修复独立页</li>
+          <li>树形编辑与批量操作</li>
+        </ul>
+      </article>
+
+      <article class="panel card">
+        <h2>技术栈</h2>
+        <ul>
+          <li>Plasmo (Manifest V3)</li>
+          <li>React 18 + TypeScript</li>
+          <li>react-arborist</li>
+          <li>YAML + CodeMirror</li>
+        </ul>
+      </article>
+
+      <article class="panel card">
+        <h2>快速开始</h2>
+        <pre><code>npm install
+npm run dev</code></pre>
+        <p>
+          打开 <code>chrome://extensions/</code>，启用开发者模式，加载
+          <code>build/chrome-mv3-dev</code>。
+        </p>
+      </article>
+    </section>
+
+    <footer class="footnote">
+      <p>© 2026 Bookmark Flow Studio</p>
+    </footer>
+  </main>
+</BaseLayout>
