@@ -1,9 +1,9 @@
 {
   "name": "bookmark-flow-studio",
   "displayName": "书签流整理工坊",
-  "version": "0.14.0",
+  "version": "0.17.0",
   "description": "书签导出、AI 提示词、导入、对比与树形编辑工具",
-  "author": "",
+  "author": "CMJNB <53365071+CMJNB@users.noreply.github.com>",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",

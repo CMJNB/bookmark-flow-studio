@@ -1,47 +1,8 @@
+@import "./styles/theme-variables.css";
+
 :root {
   --popup-width: 460px;
   --popup-height: 600px;
-  --bg: #f5f7fb;
-  --bg-accent-a: #eef2ff;
-  --bg-accent-b: #ecfeff;
-  --card: #ffffff;
-  --surface: #fafafa;
-  --surface-soft: #f9fafb;
-  --text: #1f2937;
-  --text-strong: #111827;
-  --muted: #6b7280;
-  --interactive: #334155;
-  --interactive-hover: #eef2ff;
-  --link: #0f766e;
-  --border: #d1d5db;
-  --primary: #1d4ed8;
-  --primary-hover: #1e40af;
-  --warn: #b45309;
-  --warn-hover: #92400e;
-  --ok: #047857;
-  --ok-hover: #065f46;
-}
-
-:root[data-theme="dark"] {
-  --bg: #0b1220;
-  --bg-accent-a: #111827;
-  --bg-accent-b: #0f172a;
-  --card: #111827;
-  --surface: #172033;
-  --surface-soft: #1f2937;
-  --text: #e5e7eb;
-  --text-strong: #f3f4f6;
-  --muted: #9ca3af;
-  --interactive: #d1d5db;
-  --interactive-hover: #1f2937;
-  --link: #5eead4;
-  --border: #374151;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --warn: #d97706;
-  --warn-hover: #b45309;
-  --ok: #059669;
-  --ok-hover: #047857;
 }
 
 * {
@@ -65,7 +26,7 @@ body {
   max-height: var(--popup-height);
   background: radial-gradient(circle at 0% 0%, var(--bg-accent-a) 0%, var(--bg) 45%, var(--bg-accent-b) 100%);
   color: var(--text);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-family-app);
 }
 
 .app {
@@ -79,6 +40,7 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  contain: layout paint;
 }
 
 .header h1 {
@@ -97,6 +59,7 @@ body {
   background: var(--card);
   border-radius: 12px;
   padding: 12px;
+  contain: layout paint;
 }
 
 .card h2 {
@@ -119,6 +82,7 @@ body {
   display: grid;
   gap: 6px;
   background: var(--surface);
+  contain: layout paint;
 }
 .controls {
   margin-top: 8px;
@@ -317,6 +281,7 @@ input[type="file"] {
   gap: 4px;
   font-size: 12px;
   color: var(--text-strong);
+  contain: layout paint;
 }
 
 .compare-item-title {
@@ -352,6 +317,9 @@ input[type="file"] {
   display: grid;
   gap: 6px;
   cursor: pointer;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 96px;
 }
 
 .template-card.active {

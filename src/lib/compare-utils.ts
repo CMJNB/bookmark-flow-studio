@@ -35,6 +35,15 @@ export type CompareViewerRow = {
   rightItems: BookmarkEntry[]
 }
 
+export type CompareViewerRowSortBy =
+  | "original"
+  | "label-asc"
+  | "label-desc"
+  | "url-asc"
+  | "url-desc"
+  | "count-asc"
+  | "count-desc"
+
 export type RepairCandidate = {
   id: string
   url: string
@@ -335,6 +344,42 @@ export function buildCompareViewerRows(result: CompareResult): CompareViewerRow[
   return rows.sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
 }
 
+export function sortCompareViewerRows(rows: CompareViewerRow[], sortBy: CompareViewerRowSortBy): CompareViewerRow[] {
+  const sorted = [...rows]
+  switch (sortBy) {
+    case "label-asc":
+      sorted.sort((a, b) => (a.label || "").localeCompare(b.label || "", "zh-CN"))
+      break
+    case "label-desc":
+      sorted.sort((a, b) => (b.label || "").localeCompare(a.label || "", "zh-CN"))
+      break
+    case "url-asc":
+      sorted.sort((a, b) => {
+        const aUrl = (a.leftItems[0]?.url || a.rightItems[0]?.url) || ""
+        const bUrl = (b.leftItems[0]?.url || b.rightItems[0]?.url) || ""
+        return aUrl.localeCompare(bUrl, "zh-CN")
+      })
+      break
+    case "url-desc":
+      sorted.sort((a, b) => {
+        const aUrl = (a.leftItems[0]?.url || a.rightItems[0]?.url) || ""
+        const bUrl = (b.leftItems[0]?.url || b.rightItems[0]?.url) || ""
+        return bUrl.localeCompare(aUrl, "zh-CN")
+      })
+      break
+    case "count-asc":
+      sorted.sort((a, b) => (a.leftItems.length + a.rightItems.length) - (b.leftItems.length + b.rightItems.length))
+      break
+    case "count-desc":
+      sorted.sort((a, b) => (b.leftItems.length + b.rightItems.length) - (a.leftItems.length + a.rightItems.length))
+      break
+    case "original":
+    default:
+      break
+  }
+  return sorted
+}
+
 export function buildRepairCandidates(result: CompareResult): RepairCandidate[] {
   const aUrlMap = toMapByUrl(result.allEntriesA)
   const bUrlMap = toMapByUrl(result.allEntriesB)
@@ -356,4 +401,65 @@ export function buildRepairCandidates(result: CompareResult): RepairCandidate[] 
     })
     .filter((item) => item.aEntries.length > 0 && item.bEntries.length > 0)
     .sort((left, right) => left.url.localeCompare(right.url, "zh-CN"))
+}
+
+export function normalizeRepairSourceSelection(
+  candidates: RepairCandidate[],
+  current: Record<string, string>
+): Record<string, string> {
+  if (candidates.length === 0) {
+    return Object.keys(current).length === 0 ? current : {}
+  }
+
+  const next = { ...current }
+  let changed = false
+  const validIds = new Set(candidates.flatMap((candidate) => candidate.bEntries.map((entry) => entry.id)))
+
+  for (const key of Object.keys(next)) {
+    if (!validIds.has(key)) {
+      delete next[key]
+      changed = true
+    }
+  }
+
+  for (const candidate of candidates) {
+    for (const target of candidate.bEntries) {
+      const targetKey = target.id
+      const currentSourceId = next[targetKey]
+      if (!currentSourceId || !candidate.aEntries.some((entry) => entry.id === currentSourceId)) {
+        next[targetKey] = candidate.aEntries[0].id
+        changed = true
+      }
+    }
+  }
+
+  return changed ? next : current
+}
+
+export function buildRepairedEntriesFromSelection(
+  allEntriesB: BookmarkEntry[],
+  candidates: RepairCandidate[],
+  selectedSourceIds: Record<string, string>
+): BookmarkEntry[] {
+  const selectedSourceDateByBEntryId = new Map<string, number | undefined>()
+
+  for (const candidate of candidates) {
+    for (const target of candidate.bEntries) {
+      const selectedSourceId = selectedSourceIds[target.id] ?? candidate.aEntries[0].id
+      const source = candidate.aEntries.find((entry) => entry.id === selectedSourceId) ?? candidate.aEntries[0]
+      selectedSourceDateByBEntryId.set(target.id, source.dateAdded)
+    }
+  }
+
+  return allEntriesB.map((entry) => {
+    const mappedDateAdded = selectedSourceDateByBEntryId.get(entry.id)
+    if (typeof mappedDateAdded !== "number") {
+      return entry
+    }
+
+    return {
+      ...entry,
+      dateAdded: mappedDateAdded
+    }
+  })
 }

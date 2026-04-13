@@ -1,44 +1,4 @@
-:root {
-  --bg: #f5f7fb;
-  --bg-accent-a: #eef2ff;
-  --bg-accent-b: #ecfeff;
-  --card: #ffffff;
-  --surface: #fafafa;
-  --surface-soft: #f9fafb;
-  --text: #1f2937;
-  --text-strong: #111827;
-  --muted: #6b7280;
-  --interactive: #334155;
-  --interactive-hover: #eef2ff;
-  --link: #0f766e;
-  --border: #d1d5db;
-  --primary: #1d4ed8;
-  --primary-hover: #1e40af;
-  --warn: #b45309;
-  --ok: #047857;
-  --drop-inside: #10b981;
-}
-
-:root[data-theme="dark"] {
-  --bg: #0b1220;
-  --bg-accent-a: #111827;
-  --bg-accent-b: #0f172a;
-  --card: #111827;
-  --surface: #172033;
-  --surface-soft: #1f2937;
-  --text: #e5e7eb;
-  --text-strong: #f3f4f6;
-  --muted: #9ca3af;
-  --interactive: #d1d5db;
-  --interactive-hover: #1f2937;
-  --link: #5eead4;
-  --border: #374151;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --warn: #d97706;
-  --ok: #059669;
-  --drop-inside: #34d399;
-}
+@import "../styles/theme-variables.css";
 
 * {
   box-sizing: border-box;
@@ -49,7 +9,7 @@ html, body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-family-app);
   font-size: 13px;
 }
 
@@ -120,6 +80,7 @@ html, body {
 .editor-body {
   flex: 1;
   overflow: hidden;
+  contain: layout paint;
 }
 
 .editor-error {
@@ -149,6 +110,7 @@ html, body {
   background: var(--surface);
   align-items: center;
   flex-shrink: 0;
+  contain: layout paint;
 }
 
 .editor-edit-input {
@@ -209,6 +171,7 @@ html, body {
   cursor: pointer;
   user-select: none;
   transition: background 0.1s;
+  contain: layout paint style;
 }
 
 .arb-row:hover {

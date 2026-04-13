@@ -1,3 +1,5 @@
+@import "../styles/theme-variables.css";
+
 :root {
   --viewer-bg: #f3f5fb;
   --viewer-card: #ffffff;
@@ -32,7 +34,7 @@ body {
   height: 100%;
   background: var(--viewer-bg);
   color: var(--viewer-text);
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-family-app);
 }
 
 button {
@@ -129,6 +131,7 @@ button {
   display: grid;
   gap: 12px;
   box-shadow: var(--viewer-shadow);
+  contain: layout paint;
 }
 
 .compare-viewer-repair-head {
@@ -176,6 +179,9 @@ button {
   padding: 12px;
   display: grid;
   gap: 10px;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
 }
 
 .compare-viewer-repair-choice-head {
@@ -362,6 +368,7 @@ button {
   display: grid;
   gap: 10px;
   min-height: 160px;
+  contain: layout paint;
 }
 
 .compare-viewer-column-title {

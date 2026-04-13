@@ -907,6 +907,15 @@ function IndexPopup() {
     }
   }
 
+  const openCompareRepairPage = async (): Promise<void> => {
+    try {
+      await openPopupWindow(chrome.runtime.getURL("tabs/compare-repair.html"), 1080, 820)
+      setStatusByKey("floatingCompareRepairPageOpened")
+    } catch (error) {
+      setStatusByKey("floatingCompareOpenFailed", { error: (error as Error).message })
+    }
+  }
+
   const saveAppSettings = async (): Promise<void> => {
     await saveSettings(settings)
     applyTheme(settings.theme)
@@ -1265,7 +1274,12 @@ function IndexPopup() {
         <section className="card">
           <h2>{t(settings.language, "compareTitle")}</h2>
           <p className="muted">{t(settings.language, "compareFloatingWorkflowHint")}</p>
-          <button className="btn primary" onClick={() => void openFloatingCompareViewer()}>{t(settings.language, "compareOpenFloatingEntry")}</button>
+          <div className="btn-group single">
+            <button className="btn primary" onClick={() => void openFloatingCompareViewer()}>{t(settings.language, "compareOpenFloatingEntry")}</button>
+          </div>
+          <div className="btn-group single">
+            <button className="btn ok" onClick={() => void openCompareRepairPage()}>{t(settings.language, "floatingCompareOpenRepairPage")}</button>
+          </div>
         </section>
       ) : null}
 

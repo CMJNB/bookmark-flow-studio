@@ -1,3 +1,5 @@
+@import "../styles/theme-variables.css";
+
 :root {
   color-scheme: light dark;
 }
@@ -8,14 +10,14 @@
 
 body {
   margin: 0;
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-family-app);
 }
 
 .template-editor-page {
   min-height: 100vh;
   padding: 16px;
-  background: #f5f7fb;
-  color: #1f2937;
+  background: var(--bg);
+  color: var(--text);
   display: grid;
   gap: 12px;
 }
@@ -27,14 +29,14 @@ body {
 
 .template-editor-header p {
   margin: 6px 0 0;
-  color: #6b7280;
+  color: var(--muted);
   font-size: 13px;
 }
 
 .template-editor-panel {
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--card);
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -42,19 +44,21 @@ body {
 
 .template-editor-label {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--muted);
 }
 
 .template-editor-input {
   width: 100%;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
   font-size: 13px;
+  background: var(--surface-soft);
+  color: var(--text);
 }
 
 .template-editor-cm {
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -68,9 +72,9 @@ body {
 .template-editor-status {
   margin: 0;
   padding: 8px;
-  border: 1px dashed #d1d5db;
+  border: 1px dashed var(--border);
   border-radius: 8px;
-  background: #f9fafb;
+  background: var(--surface-soft);
   font-size: 12px;
   white-space: pre-wrap;
 }
