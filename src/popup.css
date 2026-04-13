@@ -20,9 +20,6 @@
   --warn-hover: #92400e;
   --ok: #047857;
   --ok-hover: #065f46;
-  --stat-bg: #eef2ff;
-  --stat-border: #c7d2fe;
-  --stat-text: #1e3a8a;
 }
 
 :root[data-theme="dark"] {
@@ -45,9 +42,6 @@
   --warn-hover: #b45309;
   --ok: #059669;
   --ok-hover: #047857;
-  --stat-bg: #1e3a8a;
-  --stat-border: #2563eb;
-  --stat-text: #dbeafe;
 }
 
 * {
@@ -126,53 +120,6 @@ body {
   gap: 6px;
   background: var(--surface);
 }
-
-.folder-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.folder-row span {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tree-node {
-  display: grid;
-  gap: 4px;
-}
-
-.tree-toggle {
-  width: 18px;
-  height: 18px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--interactive);
-  line-height: 1;
-  padding: 0;
-}
-
-.tree-toggle:hover {
-  background: var(--interactive-hover);
-}
-
-.tree-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-
-.tree-label span {
-  min-width: 0;
-}
-
 .controls {
   margin-top: 8px;
   display: flex;
@@ -290,16 +237,6 @@ input[type="file"] {
   margin-bottom: 10px;
 }
 
-.text-input {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 12px;
-  background: var(--surface-soft);
-  color: var(--text);
-}
-
 .status,
 .prompt {
   margin: 0;
@@ -333,11 +270,6 @@ input[type="file"] {
   color: var(--text);
 }
 
-.template-editor {
-  min-height: 220px;
-  max-height: 420px;
-}
-
 .btn-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -353,6 +285,10 @@ input[type="file"] {
   margin-top: 8px;
 }
 
+.btn-group.single {
+  grid-template-columns: 1fr;
+}
+
 .btn + .btn-group {
   margin-top: 8px;
 }
@@ -366,70 +302,6 @@ input[type="file"] {
 
 .status-header h2 {
   margin: 0;
-}
-
-.compare-panel {
-  margin-top: 10px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  background: var(--surface-soft);
-  padding: 10px;
-}
-
-.compare-set-editor-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.compare-set-editor {
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  background: var(--surface-soft);
-  padding: 8px;
-}
-
-.compare-set-editor .folder-list {
-  max-height: 240px;
-  overflow: auto;
-}
-
-.compare-filter-row {
-  margin-top: 4px;
-  margin-bottom: 10px;
-}
-
-.compare-filter-row .page-btn {
-  padding: 6px 8px;
-}
-
-.compare-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.compare-stat {
-  background: var(--stat-bg);
-  border: 1px solid var(--stat-border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
-  color: var(--stat-text);
-}
-
-.compare-stat.wide {
-  grid-column: 1 / -1;
-}
-
-.compare-result-scroll {
-  max-height: 220px;
-  overflow-y: auto;
-  display: grid;
-  gap: 10px;
-  padding-right: 2px;
 }
 
 .compare-block h3 {
@@ -465,4 +337,65 @@ input[type="file"] {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 6px;
+}
+
+.template-list-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.template-card {
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.template-card.active {
+  border-color: #60a5fa;
+  background: #dbeafe;
+}
+
+:root[data-theme="dark"] .template-card.active {
+  background: #1e3a8a;
+}
+
+.template-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.template-card-time {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.template-card-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.template-card-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--link);
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.prompt-toolbar-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
 }

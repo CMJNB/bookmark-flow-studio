@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.template-editor-page {
+  min-height: 100vh;
+  padding: 16px;
+  background: #f5f7fb;
+  color: #1f2937;
+  display: grid;
+  gap: 12px;
+}
+
+.template-editor-header h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.template-editor-header p {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.template-editor-panel {
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.template-editor-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.template-editor-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.template-editor-cm {
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.template-editor-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.template-editor-status {
+  margin: 0;
+  padding: 8px;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  background: #f9fafb;
+  font-size: 12px;
+  white-space: pre-wrap;
+}

@@ -26,4 +26,9 @@ export type BookmarkEntry = {
   title: string
   url: string
   path: string
+  pathSegments: string[]
+  dateAdded?: number
+  dateGroupModified?: number
+  parentId?: string
+  index?: number
 }

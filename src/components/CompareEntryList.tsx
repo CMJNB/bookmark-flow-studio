@@ -60,6 +60,9 @@ export function CompareEntryList({
             <div className="compare-viewer-entry-title">{entry.title || t(language, "emptyTitle")}</div>
             <div className="compare-viewer-entry-sub">URL: {entry.url}</div>
             <div className="compare-viewer-entry-sub">{t(language, "sourcePath")}: {entry.path || t(language, "rootPath")}</div>
+            {entry.dateAdded ? (
+              <div className="compare-viewer-entry-sub">{t(language, "dateAdded")}: {new Date(entry.dateAdded).toLocaleString(language)}</div>
+            ) : null}
             <div className="compare-viewer-entry-actions">
               <button
                 className="compare-viewer-entry-btn"

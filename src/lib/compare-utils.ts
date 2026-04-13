@@ -35,6 +35,13 @@ export type CompareViewerRow = {
   rightItems: BookmarkEntry[]
 }
 
+export type RepairCandidate = {
+  id: string
+  url: string
+  aEntries: BookmarkEntry[]
+  bEntries: BookmarkEntry[]
+}
+
 export type CompareResult = {
   stats: CompareStats
   allEntriesA: BookmarkEntry[]
@@ -84,7 +91,12 @@ function collectBookmarkEntries(nodes: BookmarkNode[]): BookmarkEntry[] {
         id: node.id,
         title: node.title || "",
         url: node.url,
-        path: folderPath.join(" / ")
+        path: folderPath.join(" / "),
+        pathSegments: [...folderPath],
+        dateAdded: node.dateAdded,
+        dateGroupModified: node.dateGroupModified,
+        parentId: node.parentId,
+        index: node.index
       })
     }
   }
@@ -198,7 +210,12 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
         id: entry.id,
         title: entry.title,
         url: entry.url,
-        path: entry.path
+        path: entry.path,
+        pathSegments: entry.pathSegments,
+        dateAdded: entry.dateAdded,
+        dateGroupModified: entry.dateGroupModified,
+        parentId: entry.parentId,
+        index: entry.index
       }))
     )
   )
@@ -211,7 +228,12 @@ export function compareBookmarkSelections(aRoots: BookmarkNode[], bRoots: Bookma
         id: entry.id,
         title: entry.title,
         url: entry.url,
-        path: entry.path
+        path: entry.path,
+        pathSegments: entry.pathSegments,
+        dateAdded: entry.dateAdded,
+        dateGroupModified: entry.dateGroupModified,
+        parentId: entry.parentId,
+        index: entry.index
       }))
     )
   )
@@ -311,4 +333,27 @@ export function buildCompareViewerRows(result: CompareResult): CompareViewerRow[
   ]
 
   return rows.sort((left, right) => left.label.localeCompare(right.label, "zh-CN"))
+}
+
+export function buildRepairCandidates(result: CompareResult): RepairCandidate[] {
+  const aUrlMap = toMapByUrl(result.allEntriesA)
+  const bUrlMap = toMapByUrl(result.allEntriesB)
+
+  return [...aUrlMap.keys()]
+    .filter((key) => bUrlMap.has(key))
+    .map((urlKey) => {
+      const aEntries = sortEntries(
+        (aUrlMap.get(urlKey) ?? []).filter((entry) => typeof entry.dateAdded === "number" && entry.dateAdded > 0)
+      )
+      const bEntries = sortEntries(bUrlMap.get(urlKey) ?? [])
+
+      return {
+        id: `repair-${urlKey}`,
+        url: aEntries[0]?.url || bEntries[0]?.url || urlKey,
+        aEntries,
+        bEntries
+      }
+    })
+    .filter((item) => item.aEntries.length > 0 && item.bEntries.length > 0)
+    .sort((left, right) => left.url.localeCompare(right.url, "zh-CN"))
 }

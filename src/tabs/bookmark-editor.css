@@ -204,7 +204,7 @@ html, body {
   align-items: center;
   gap: 6px;
   height: 100%;
-  padding-right: 8px;
+  padding: 4px 8px 4px 0;
   border-radius: 4px;
   cursor: pointer;
   user-select: none;
@@ -295,6 +295,16 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.2;
+}
+
+.arb-date {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  opacity: 0.75;
 }
 
 /* Delete button */

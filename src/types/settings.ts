@@ -6,15 +6,22 @@ export type AppSettings = {
   language: AppLanguage
 }
 
+export type PromptMode = "url" | "hash" | "incremental"
+export type PromptDataMode = "url" | "hash"
+
 export type PromptTemplate = {
   id: string
   name: string
   content: string
+  mode: PromptMode
   updatedAt: number
 }
 
 export type PromptTemplateState = {
-  selectedTemplateId: string
+  selectedTemplateIds: Record<PromptMode, string>
+  exportMode: PromptMode
+  incrementalSetAMode: PromptDataMode
+  incrementalSetBMode: PromptDataMode
   templates: PromptTemplate[]
 }
 

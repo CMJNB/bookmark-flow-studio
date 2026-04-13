@@ -85,6 +85,9 @@ function BmkNode({ node, style, dragHandle }: NodeRendererProps<BookmarkNode>) {
           {node.data.title || `(${t(lang, "emptyTitle")})`}
         </span>
         {node.data.url && <span className="arb-url">{node.data.url}</span>}
+        {!isFolder && node.data.dateAdded ? (
+          <span className="arb-date">{new Date(node.data.dateAdded).toLocaleString(lang)}</span>
+        ) : null}
       </div>
 
       {node.data.url && (
@@ -702,7 +705,7 @@ function BookmarkEditorPage() {
               width="100%"
               height={treeHeight}
               indent={20}
-              rowHeight={36}
+              rowHeight={52}
               searchTerm={searchTerm}
               searchMatch={searchMatch}
               childrenAccessor={(d) => d.children ?? null}

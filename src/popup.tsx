@@ -1,10 +1,12 @@
 /// <reference types="chrome" />
 import { useEffect, useMemo, useState } from "react"
 
-import "../popup.css"
+import "./popup.css"
 import { FolderTreeView } from "./components/FolderTreeView"
+import { bookmarkNodesToHtmlTree, bookmarkTreeToHtml } from "./lib/bookmark-html"
 import { compareBookmarkSelections } from "./lib/compare-utils"
 import type { CompareResult } from "./lib/compare-utils"
+import { loadCompareViewerState } from "./lib/compare-viewer-state"
 import { createBookmark, downloadTextFile, getTree, openPopupWindow } from "./lib/chrome-api"
 import {
   buildFolderTree,
@@ -20,7 +22,15 @@ import {
 import { formatDateForFileName } from "./lib/format"
 import { t, tf, LANG_NAMES } from "./lib/i18n"
 import { normalizeImportData, parseStructuredInput } from "./lib/import-utils"
-import { DEFAULT_PROMPT_TEMPLATE, DEFAULT_HASH_PROMPT_TEMPLATE, buildAiPrompt, buildHashAiPrompt, toYaml } from "./lib/prompt-utils"
+import {
+  DEFAULT_HASH_PROMPT_TEMPLATE,
+  DEFAULT_INCREMENTAL_PROMPT_TEMPLATE,
+  DEFAULT_PROMPT_TEMPLATE,
+  buildAiPrompt,
+  buildHashAiPrompt,
+  buildIncrementalAiPrompt,
+  toYaml
+} from "./lib/prompt-utils"
 import { buildHashMap, countHashResolution, resolveHashImport, toYamlWithHashes } from "./lib/hash-utils"
 import {
   applyTheme,
@@ -34,8 +44,18 @@ import {
   savePromptTemplateState,
   saveSettings
 } from "./lib/settings"
+import { useStorageListener } from "./lib/use-storage-listener"
 import type { BookmarkNode, ExportNode, FolderTreeNode, PageKey } from "./types/bookmark"
-import type { AppConfigSnapshot, AppLanguage, AppSettings, PromptTemplateState, ThemeMode } from "./types/settings"
+import type {
+  AppConfigSnapshot,
+  AppLanguage,
+  AppSettings,
+  PromptDataMode,
+  PromptMode,
+  PromptTemplate,
+  PromptTemplateState,
+  ThemeMode
+} from "./types/settings"
 
 type CompareFilter = "title-only" | "url-only" | "title-url-conflict"
 
@@ -78,9 +98,10 @@ function IndexPopup() {
   const [autoBackup, setAutoBackup] = useState(true)
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [templateState, setTemplateState] = useState<PromptTemplateState>(defaultPromptTemplateState)
-  const [editingTemplateId, setEditingTemplateId] = useState(defaultPromptTemplateState.selectedTemplateId)
-  const [templateNameDraft, setTemplateNameDraft] = useState(defaultPromptTemplateState.templates[0].name)
-  const [templateContentDraft, setTemplateContentDraft] = useState(defaultPromptTemplateState.templates[0].content)
+  const [templateModePage, setTemplateModePage] = useState<PromptMode>(defaultPromptTemplateState.exportMode)
+  const [editingTemplateId, setEditingTemplateId] = useState(defaultPromptTemplateState.selectedTemplateIds.url)
+  const [templateImportFile, setTemplateImportFile] = useState<File | null>(null)
+  const [incrementalSetAFolderIds, setIncrementalSetAFolderIds] = useState<string[]>([])
   const [status, setStatus] = useState(t(defaultSettings.language, "statusIdle"))
   const [promptText, setPromptText] = useState("")
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -91,17 +112,24 @@ function IndexPopup() {
   const [copyPromptSuccess, setCopyPromptSuccess] = useState(false)
   const [hashMap, setHashMap] = useState<Record<string, string>>({})
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
+  const templatesInCurrentPage = useMemo(
+    () => templateState.templates.filter((item) => item.mode === templateModePage),
+    [templateModePage, templateState.templates]
+  )
+
   const activeTemplate = useMemo(() => {
+    const selectedId = templateState.selectedTemplateIds[templateState.exportMode]
     return (
-      templateState.templates.find((item) => item.id === templateState.selectedTemplateId) ??
+      templateState.templates.find((item) => item.id === selectedId && item.mode === templateState.exportMode) ??
+      templateState.templates.find((item) => item.mode === templateState.exportMode) ??
       templateState.templates[0] ??
       defaultPromptTemplateState.templates[0]
     )
   }, [templateState])
 
   const editingTemplate = useMemo(() => {
-    return templateState.templates.find((item) => item.id === editingTemplateId) ?? null
-  }, [editingTemplateId, templateState.templates])
+    return templateState.templates.find((item) => item.id === editingTemplateId && item.mode === templateModePage) ?? null
+  }, [editingTemplateId, templateModePage, templateState.templates])
 
   const setStatusByKey = (key: string, vars?: Record<string, string | number>): void => {
     setStatus(vars ? tf(settings.language, key, vars) : t(settings.language, key))
@@ -115,8 +143,17 @@ function IndexPopup() {
     }
 
     setEditingTemplateId(target.id)
-    setTemplateNameDraft(target.name)
-    setTemplateContentDraft(target.content)
+  }
+
+  const openTemplateModePage = (mode: PromptMode): void => {
+    setTemplateModePage(mode)
+    const target =
+      templateState.templates.find((item) => item.id === templateState.selectedTemplateIds[mode] && item.mode === mode) ??
+      templateState.templates.find((item) => item.mode === mode)
+
+    if (target) {
+      openTemplateForEdit(target.id)
+    }
   }
 
   const reloadBookmarkTree = async (): Promise<void> => {
@@ -139,13 +176,18 @@ function IndexPopup() {
         applyTheme(loaded.theme)
         setStatus(t(loaded.language, "statusIdle"))
 
+        setTemplateModePage(loadedTemplateState.exportMode)
         const firstEditTemplate =
-          loadedTemplateState.templates.find((item) => item.id === loadedTemplateState.selectedTemplateId) ??
-          loadedTemplateState.templates[0]
+          loadedTemplateState.templates.find(
+            (item) => item.id === loadedTemplateState.selectedTemplateIds[loadedTemplateState.exportMode]
+          ) ?? loadedTemplateState.templates.find((item) => item.mode === loadedTemplateState.exportMode)
         if (firstEditTemplate) {
           setEditingTemplateId(firstEditTemplate.id)
-          setTemplateNameDraft(firstEditTemplate.name)
-          setTemplateContentDraft(firstEditTemplate.content)
+        }
+
+        const compareState = await loadCompareViewerState()
+        if (compareState?.compareSetAIds?.length) {
+          setIncrementalSetAFolderIds(compareState.compareSetAIds)
         }
 
         await reloadBookmarkTree()
@@ -166,14 +208,18 @@ function IndexPopup() {
     return () => media.removeEventListener("change", listener)
   }, [settings.theme])
 
-  useEffect(() => {
-    if (!editingTemplate) {
-      return
-    }
+  useStorageListener(async () => {
+    const latest = await loadPromptTemplateState()
+    setTemplateState(latest)
 
-    setTemplateNameDraft(editingTemplate.name)
-    setTemplateContentDraft(editingTemplate.content)
-  }, [editingTemplate])
+    const latestEditing = latest.templates.find((item) => item.id === editingTemplateId)
+    if (!latestEditing) {
+      const fallback = latest.templates.find((item) => item.mode === templateModePage) ?? latest.templates[0]
+      if (fallback) {
+        setEditingTemplateId(fallback.id)
+      }
+    }
+  })
 
   const exportRoots = useMemo(() => {
     return buildSelectedExportRoots(tree, selectedFolderIds, allNodes)
@@ -194,6 +240,16 @@ function IndexPopup() {
       links: exportStats.links
     })}`
   }, [exportStats.folders, exportStats.links, selectedFolderIds.length, settings.language])
+
+  const effectiveImportMode = useMemo<PromptDataMode>(() => {
+    if (templateState.exportMode === "url") {
+      return "url"
+    }
+    if (templateState.exportMode === "hash") {
+      return "hash"
+    }
+    return templateState.incrementalSetBMode
+  }, [templateState.exportMode, templateState.incrementalSetBMode])
 
   const toggleFolder = (id: string): void => {
     setSelectedFolderIds((prev) => {
@@ -238,35 +294,83 @@ function IndexPopup() {
     setStatusByKey("statusExportSuccess", { fileName, count: roots.length })
   }
 
-  const exportAiPrompt = async (): Promise<void> => {
-    const { roots } = buildExportData()
-    const slim = roots.map(nodeToSlim)
-    const yaml = toYaml(slim)
-    const prompt = buildAiPrompt(yaml, activeTemplate.content)
+  const exportStandardHtml = async (): Promise<void> => {
+    const roots = exportRoots
+    const html = bookmarkTreeToHtml(bookmarkNodesToHtmlTree(roots))
+    const stamp = formatDateForFileName(new Date())
+    const fileName = `bookmarks-export-standard-${stamp}.html`
 
-    setPromptText(prompt)
-    setStatusByKey("statusPromptGenerated", { count: roots.length })
+    await downloadTextFile(fileName, html, "text/html;charset=utf-8")
+    setStatusByKey("statusHtmlExportSuccess", { fileName, count: roots.length })
   }
 
-  const generateHashAiPrompt = async (): Promise<void> => {
+  const generatePromptByCurrentMode = async (): Promise<void> => {
+    if (templateState.exportMode === "incremental") {
+      const setAIds = incrementalSetAFolderIds
+      const setBIds = selectedFolderIds
+
+      if (setAIds.length === 0) {
+        setStatusByKey("statusIncrementalNeedSets")
+        return
+      }
+
+      const rootsA = buildSelectedExportRoots(tree, setAIds, allNodes)
+      const rootsB = buildSelectedExportRoots(tree, setBIds, allNodes)
+      const slimA = rootsA.map(nodeToSlim)
+      const slimB = rootsB.map(nodeToSlim)
+
+      const setAData =
+        templateState.incrementalSetAMode === "hash" ? toYamlWithHashes(slimA) : toYaml(slimA)
+      const setBData =
+        templateState.incrementalSetBMode === "hash" ? toYamlWithHashes(slimB) : toYaml(slimB)
+
+      if (templateState.incrementalSetAMode === "hash" || templateState.incrementalSetBMode === "hash") {
+        const mergedHashMap = {
+          ...buildHashMap(slimA),
+          ...buildHashMap(slimB)
+        }
+        setHashMap(mergedHashMap)
+        await saveHashMap(mergedHashMap)
+      }
+
+      const prompt = buildIncrementalAiPrompt(
+        setAData,
+        setBData,
+        templateState.incrementalSetAMode,
+        templateState.incrementalSetBMode,
+        activeTemplate.content || DEFAULT_INCREMENTAL_PROMPT_TEMPLATE
+      )
+
+      setPromptText(prompt)
+      setStatusByKey("statusIncrementalPromptGenerated", {
+        setA: rootsA.length,
+        setB: rootsB.length
+      })
+      return
+    }
+
     const { roots } = buildExportData()
     const slim = roots.map(nodeToSlim)
-    const newHashMap = buildHashMap(slim)
-    const yamlHash = toYamlWithHashes(slim)
-    // Find hash template or fall back to built-in hash template
-    const hashTpl =
-      templateState.templates.find((item) => item.id === "hash-template") ?? {
-        content: DEFAULT_HASH_PROMPT_TEMPLATE
-      }
-    const prompt = buildHashAiPrompt(yamlHash, hashTpl.content)
 
-    setHashMap(newHashMap)
-    await saveHashMap(newHashMap)
+    if (templateState.exportMode === "hash") {
+      const newHashMap = buildHashMap(slim)
+      const yamlHash = toYamlWithHashes(slim)
+      const prompt = buildHashAiPrompt(yamlHash, activeTemplate.content || DEFAULT_HASH_PROMPT_TEMPLATE)
+
+      setHashMap(newHashMap)
+      await saveHashMap(newHashMap)
+      setPromptText(prompt)
+      setStatusByKey("statusHashPromptGenerated", {
+        count: roots.length,
+        hashes: Object.keys(newHashMap).length
+      })
+      return
+    }
+
+    const yaml = toYaml(slim)
+    const prompt = buildAiPrompt(yaml, activeTemplate.content || DEFAULT_PROMPT_TEMPLATE)
     setPromptText(prompt)
-    setStatusByKey("statusHashPromptGenerated", {
-      count: roots.length,
-      hashes: Object.keys(newHashMap).length
-    })
+    setStatusByKey("statusPromptGenerated", { count: roots.length })
   }
 
   const importFromHashText = async (rawText: string, sourceName: string): Promise<void> => {
@@ -338,6 +442,24 @@ function IndexPopup() {
     await importFromHashText(pastedData, t(settings.language, "pastedContent"))
   }
 
+  const importByCurrentModeFromFile = async (): Promise<void> => {
+    if (effectiveImportMode === "hash") {
+      await importFromFileHash()
+      return
+    }
+
+    await importFromFile()
+  }
+
+  const importByCurrentModeFromPaste = async (): Promise<void> => {
+    if (effectiveImportMode === "hash") {
+      await importFromPastedDataHash()
+      return
+    }
+
+    await importFromPastedData()
+  }
+
   const openBookmarkEditor = async (): Promise<void> => {
     try {
       await openPopupWindow(chrome.runtime.getURL("tabs/bookmark-editor.html"), 900, 700)
@@ -353,13 +475,36 @@ function IndexPopup() {
     setStatus(successStatus)
   }
 
+  const getModeDefaultTemplate = (mode: PromptMode): Pick<PromptTemplate, "name" | "content"> => {
+    if (mode === "hash") {
+      return {
+        name: t(settings.language, "hashTemplateDefaultName"),
+        content: DEFAULT_HASH_PROMPT_TEMPLATE
+      }
+    }
+
+    if (mode === "incremental") {
+      return {
+        name: t(settings.language, "incrementalTemplateDefaultName"),
+        content: DEFAULT_INCREMENTAL_PROMPT_TEMPLATE
+      }
+    }
+
+    return {
+      name: t(settings.language, "newTemplateName"),
+      content: DEFAULT_PROMPT_TEMPLATE
+    }
+  }
+
   const createTemplate = async (): Promise<void> => {
     const id = `tpl-${Date.now()}`
     const now = Date.now()
-    const newTemplate = {
+    const defaults = getModeDefaultTemplate(templateModePage)
+    const newTemplate: PromptTemplate = {
       id,
-      name: t(settings.language, "newTemplateName"),
-      content: DEFAULT_PROMPT_TEMPLATE,
+      mode: templateModePage,
+      name: defaults.name,
+      content: defaults.content,
       updatedAt: now
     }
 
@@ -370,59 +515,15 @@ function IndexPopup() {
 
     await persistTemplateState(next, t(settings.language, "statusTemplateCreated"))
     setEditingTemplateId(id)
-    setTemplateNameDraft(newTemplate.name)
-    setTemplateContentDraft(newTemplate.content)
   }
 
-  const createHashTemplate = async (): Promise<void> => {
-    const id = `hash-template-${Date.now()}`
-    const now = Date.now()
-    const newTemplate = {
-      id,
-      name: t(settings.language, "hashTemplateDefaultName"),
-      content: DEFAULT_HASH_PROMPT_TEMPLATE,
-      updatedAt: now
+  const openTemplateEditor = async (templateId: string): Promise<void> => {
+    try {
+      const url = chrome.runtime.getURL(`tabs/template-editor.html?templateId=${encodeURIComponent(templateId)}`)
+      await openPopupWindow(url, 980, 760)
+    } catch (error) {
+      setStatusByKey("floatingCompareOpenFailed", { error: (error as Error).message })
     }
-
-    const next = {
-      ...templateState,
-      templates: [...templateState.templates, newTemplate]
-    }
-
-    await persistTemplateState(next, t(settings.language, "statusTemplateCreated"))
-    setEditingTemplateId(id)
-    setTemplateNameDraft(newTemplate.name)
-    setTemplateContentDraft(newTemplate.content)
-  }
-
-  const saveTemplateDraft = async (): Promise<void> => {
-    if (!editingTemplate) {
-      setStatusByKey("statusNoEditableTemplate")
-      return
-    }
-
-    const name = templateNameDraft.trim() || t(settings.language, "untitledTemplate")
-    const content = templateContentDraft.trim()
-    if (!content) {
-      setStatusByKey("statusTemplateEmpty")
-      return
-    }
-
-    const next = {
-      ...templateState,
-      templates: templateState.templates.map((item) =>
-        item.id === editingTemplate.id
-          ? {
-              ...item,
-              name,
-              content,
-              updatedAt: Date.now()
-            }
-          : item
-      )
-    }
-
-    await persistTemplateState(next, t(settings.language, "statusTemplateSaved"))
   }
 
   const applyEditingTemplate = async (): Promise<void> => {
@@ -433,29 +534,44 @@ function IndexPopup() {
 
     const next = {
       ...templateState,
-      selectedTemplateId: editingTemplate.id
+      selectedTemplateIds: {
+        ...templateState.selectedTemplateIds,
+        [editingTemplate.mode]: editingTemplate.id
+      }
     }
 
     await persistTemplateState(next, t(settings.language, "statusTemplateApplied"))
   }
 
-  const deleteEditingTemplate = async (): Promise<void> => {
-    if (!editingTemplate) {
+  const deleteTemplateById = async (templateId: string): Promise<void> => {
+    const target = templateState.templates.find((item) => item.id === templateId)
+    if (!target) {
       setStatusByKey("statusNoTemplateToDelete")
       return
     }
 
-    if (templateState.templates.length <= 1) {
-      setStatusByKey("statusKeepOneTemplate")
+    const modeTemplates = templateState.templates.filter((item) => item.mode === target.mode)
+    if (modeTemplates.length <= 1) {
+      setStatusByKey("statusKeepOneTemplatePerMode")
       return
     }
 
-    const remaining = templateState.templates.filter((item) => item.id !== editingTemplate.id)
-    const fallback = remaining[0]
-    const nextSelected =
-      templateState.selectedTemplateId === editingTemplate.id ? fallback.id : templateState.selectedTemplateId
+    const remaining = templateState.templates.filter((item) => item.id !== target.id)
+    const fallback = remaining.find((item) => item.mode === target.mode)
+    if (!fallback) {
+      setStatusByKey("statusTemplateDeleted")
+      return
+    }
+
     const next = {
-      selectedTemplateId: nextSelected,
+      ...templateState,
+      selectedTemplateIds: {
+        ...templateState.selectedTemplateIds,
+        [target.mode]:
+          templateState.selectedTemplateIds[target.mode] === target.id
+            ? fallback.id
+            : templateState.selectedTemplateIds[target.mode]
+      },
       templates: remaining
     }
 
@@ -463,9 +579,155 @@ function IndexPopup() {
     openTemplateForEdit(fallback.id)
   }
 
-  const restoreDefaultTemplate = (): void => {
-    setTemplateContentDraft(DEFAULT_PROMPT_TEMPLATE)
-    setStatusByKey("statusTemplateRestoredRememberSave")
+  const toggleIncrementalSetAFolder = (id: string): void => {
+    setIncrementalSetAFolderIds((prev) => {
+      const next = new Set(prev)
+      const cascadeIds = [id, ...getDescendantFolderIds(id, allNodes)]
+
+      if (next.has(id)) {
+        for (const targetId of cascadeIds) {
+          next.delete(targetId)
+        }
+      } else {
+        for (const targetId of cascadeIds) {
+          next.add(targetId)
+        }
+      }
+
+      return [...next]
+    })
+  }
+
+  const useLastCompareSetA = async (): Promise<void> => {
+    const state = await loadCompareViewerState()
+    const ids = state?.compareSetAIds ?? []
+    if (ids.length === 0) {
+      setStatusByKey("statusIncrementalNeedSets")
+      return
+    }
+
+    setIncrementalSetAFolderIds(ids)
+    setStatusByKey("statusSelectionSavedA")
+  }
+
+  const setExportMode = async (mode: PromptMode): Promise<void> => {
+    const next = {
+      ...templateState,
+      exportMode: mode
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateModeSaved"))
+  }
+
+  const setIncrementalDataMode = async (target: "A" | "B", mode: PromptDataMode): Promise<void> => {
+    const next = {
+      ...templateState,
+      incrementalSetAMode: target === "A" ? mode : templateState.incrementalSetAMode,
+      incrementalSetBMode: target === "B" ? mode : templateState.incrementalSetBMode
+    }
+
+    await persistTemplateState(next, t(settings.language, "statusTemplateModeSaved"))
+  }
+
+  const exportTemplatesByMode = async (): Promise<void> => {
+    const modeTemplates = templateState.templates.filter((item) => item.mode === templateModePage)
+    const payload = {
+      version: 1,
+      mode: templateModePage,
+      selectedTemplateId: templateState.selectedTemplateIds[templateModePage],
+      templates: modeTemplates
+    }
+    const stamp = formatDateForFileName(new Date())
+    await downloadTextFile(
+      `prompt-templates-${templateModePage}-${stamp}.json`,
+      JSON.stringify(payload, null, 2),
+      "application/json;charset=utf-8"
+    )
+    setStatusByKey("statusTemplateExported", { mode: templateModePage, count: modeTemplates.length })
+  }
+
+  const importTemplatesByModeFromText = async (rawText: string, sourceName: string): Promise<void> => {
+    if (!rawText.trim()) {
+      setStatusByKey("statusConfigEmpty")
+      return
+    }
+
+    try {
+      const parsed = parseStructuredInput(rawText) as Record<string, unknown>
+      const incomingMode = (parsed.mode as PromptMode | undefined) ?? templateModePage
+      if (incomingMode !== templateModePage) {
+        setStatusByKey("statusTemplateImportModeMismatch", {
+          mode: templateModePage,
+          sourceMode: incomingMode
+        })
+        return
+      }
+
+      const importedTemplates = Array.isArray(parsed.templates)
+        ? parsed.templates
+            .map((item, index) => {
+              const obj = item as Record<string, unknown>
+              if (typeof obj.name !== "string" || typeof obj.content !== "string") {
+                return null
+              }
+              return {
+                id: typeof obj.id === "string" ? obj.id : `${templateModePage}-import-${Date.now()}-${index}`,
+                mode: templateModePage,
+                name: obj.name,
+                content: obj.content,
+                updatedAt: typeof obj.updatedAt === "number" ? obj.updatedAt : Date.now()
+              } as PromptTemplate
+            })
+            .filter((item): item is PromptTemplate => item !== null)
+        : []
+
+      if (importedTemplates.length === 0) {
+        setStatusByKey("statusTemplateImportEmpty")
+        return
+      }
+
+      const selectedTemplateIdRaw = parsed.selectedTemplateId
+      const nextSelected =
+        typeof selectedTemplateIdRaw === "string" && importedTemplates.some((item) => item.id === selectedTemplateIdRaw)
+          ? selectedTemplateIdRaw
+          : importedTemplates[0].id
+
+      const next = {
+        ...templateState,
+        selectedTemplateIds: {
+          ...templateState.selectedTemplateIds,
+          [templateModePage]: nextSelected
+        },
+        templates: [
+          ...templateState.templates.filter((item) => item.mode !== templateModePage),
+          ...importedTemplates
+        ]
+      }
+
+      await persistTemplateState(next, t(settings.language, "statusTemplateImported"))
+      openTemplateForEdit(nextSelected)
+      setStatusByKey("statusTemplateImportedFrom", {
+        source: sourceName,
+        mode: templateModePage,
+        count: importedTemplates.length
+      })
+    } catch (error) {
+      setStatusByKey("statusConfigImportFailed", { error: (error as Error).message })
+    }
+  }
+
+  const importTemplatesByModeFromFile = async (): Promise<void> => {
+    if (!templateImportFile) {
+      setStatusByKey("statusChooseConfigFile")
+      return
+    }
+
+    try {
+      const text = await readFileText(templateImportFile)
+      await importTemplatesByModeFromText(text, templateImportFile.name)
+    } catch (error) {
+      setStatusByKey("statusReadConfigFileFailed", { error: (error as Error).message })
+    }
   }
 
   const downloadAiPrompt = async (): Promise<void> => {
@@ -695,12 +957,13 @@ function IndexPopup() {
       setTemplateState(nextTemplateState)
       applyTheme(nextSettings.theme)
 
+      setTemplateModePage(nextTemplateState.exportMode)
       const editTarget =
-        nextTemplateState.templates.find((item) => item.id === nextTemplateState.selectedTemplateId) ?? nextTemplateState.templates[0]
+        nextTemplateState.templates.find(
+          (item) => item.id === nextTemplateState.selectedTemplateIds[nextTemplateState.exportMode]
+        ) ?? nextTemplateState.templates.find((item) => item.mode === nextTemplateState.exportMode)
       if (editTarget) {
         setEditingTemplateId(editTarget.id)
-        setTemplateNameDraft(editTarget.name)
-        setTemplateContentDraft(editTarget.content)
       }
 
       setStatusByKey("statusConfigImported", { source: sourceName })
@@ -789,7 +1052,8 @@ function IndexPopup() {
 
       {activePage === "select" ? (
         <section className="card">
-          <h2>{t(settings.language, "scopeTitle")}</h2>
+          <h2>{templateState.exportMode === "incremental" ? t(settings.language, "scopeTitleIncrementalB") : t(settings.language, "scopeTitle")}</h2>
+          {templateState.exportMode === "incremental" ? <p className="muted">{t(settings.language, "scopeHintIncrementalB")}</p> : null}
           <p className="muted">{selectedCountLabel}</p>
           <div className="folder-list">
             <FolderTreeView
@@ -815,46 +1079,133 @@ function IndexPopup() {
           <p className="muted">{t(settings.language, "templateHint")}</p>
 
           <div className="settings-group">
-            <div className="settings-label">{t(settings.language, "templateList")}</div>
+            <div className="settings-label">{t(settings.language, "templateModePager")}</div>
             <div className="controls wrap">
-              {templateState.templates.map((item) => (
-                <button
-                  key={item.id}
-                  className={`page-btn ${editingTemplateId === item.id ? "active" : ""}`}
-                  onClick={() => openTemplateForEdit(item.id)}>
-                  {item.name}
-                </button>
-              ))}
+              <button
+                className={`page-btn ${templateModePage === "url" ? "active" : ""}`}
+                onClick={() => openTemplateModePage("url")}>
+                {t(settings.language, "modeUrl")}
+              </button>
+              <button
+                className={`page-btn ${templateModePage === "hash" ? "active" : ""}`}
+                onClick={() => openTemplateModePage("hash")}>
+                {t(settings.language, "modeHash")}
+              </button>
+              <button
+                className={`page-btn ${templateModePage === "incremental" ? "active" : ""}`}
+                onClick={() => openTemplateModePage("incremental")}>
+                {t(settings.language, "modeIncremental")}
+              </button>
             </div>
           </div>
 
           <div className="settings-group">
-            <div className="settings-label">{t(settings.language, "templateName")}</div>
-            <input
-              className="text-input"
-              value={templateNameDraft}
-              onChange={(e) => setTemplateNameDraft(e.target.value)}
-              placeholder={t(settings.language, "templateName")}
-            />
+            <div className="settings-label">{t(settings.language, "templateList")}</div>
+            <div className="template-list-grid">
+              {templatesInCurrentPage.map((item) => (
+                <article
+                  key={item.id}
+                  className={`template-card ${editingTemplateId === item.id ? "active" : ""}`}
+                  onClick={() => openTemplateForEdit(item.id)}>
+                  <div className="template-card-title">{item.name}</div>
+                  <div className="template-card-time">{new Date(item.updatedAt).toLocaleString(settings.language)}</div>
+                  {editingTemplateId === item.id ? (
+                    <div className="template-card-actions">
+                      <button className="link-btn" onClick={() => void applyEditingTemplate()}>{t(settings.language, "applyTemplate")}</button>
+                      <button className="link-btn" onClick={() => void openTemplateEditor(item.id)}>{t(settings.language, "editTemplateInWindow")}</button>
+                      <button className="link-btn" onClick={() => void deleteTemplateById(item.id)}>{t(settings.language, "deleteTemplate")}</button>
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+
+              <button className="template-card-add" onClick={() => void createTemplate()}>
+                + {t(settings.language, "addTemplate")}
+              </button>
+            </div>
           </div>
 
           <div className="settings-group">
-            <div className="settings-label">{t(settings.language, "templateContent")}</div>
-            <textarea
-              className="paste-input template-editor"
-              placeholder={t(settings.language, "templateContentPlaceholder")}
-              value={templateContentDraft}
-              onChange={(e) => setTemplateContentDraft(e.target.value)}
-            />
+            <div className="settings-label">{t(settings.language, "templateCommonExportMode")}</div>
+            <div className="controls wrap">
+              <button
+                className={`page-btn ${templateState.exportMode === "url" ? "active" : ""}`}
+                onClick={() => void setExportMode("url")}>
+                {t(settings.language, "modeUrl")}
+              </button>
+              <button
+                className={`page-btn ${templateState.exportMode === "hash" ? "active" : ""}`}
+                onClick={() => void setExportMode("hash")}>
+                {t(settings.language, "modeHash")}
+              </button>
+              <button
+                className={`page-btn ${templateState.exportMode === "incremental" ? "active" : ""}`}
+                onClick={() => void setExportMode("incremental")}>
+                {t(settings.language, "modeIncremental")}
+              </button>
+            </div>
           </div>
 
-          <div className="controls wrap">
-            <button className="link-btn" onClick={() => void createTemplate()}>{t(settings.language, "newTemplate")}</button>
-            <button className="link-btn" onClick={() => void createHashTemplate()}>{t(settings.language, "createHashTemplate")}</button>
-            <button className="link-btn" onClick={() => void saveTemplateDraft()}>{t(settings.language, "saveTemplate")}</button>
-            <button className="link-btn" onClick={() => void applyEditingTemplate()}>{t(settings.language, "applyTemplate")}</button>
-            <button className="link-btn" onClick={() => void deleteEditingTemplate()}>{t(settings.language, "deleteTemplate")}</button>
-            <button className="link-btn" onClick={restoreDefaultTemplate}>{t(settings.language, "restoreDefaultTemplate")}</button>
+          {templateState.exportMode === "incremental" ? (
+            <div className="settings-group">
+              <div className="settings-label">{t(settings.language, "templateIncrementalModeTitle")}</div>
+              <div className="muted">{t(settings.language, "templateIncrementalModeHint")}</div>
+              <div className="controls wrap">
+                <span className="settings-label">A:</span>
+                <button
+                  className={`page-btn ${templateState.incrementalSetAMode === "url" ? "active" : ""}`}
+                  onClick={() => void setIncrementalDataMode("A", "url")}>
+                  {t(settings.language, "modeUrl")}
+                </button>
+                <button
+                  className={`page-btn ${templateState.incrementalSetAMode === "hash" ? "active" : ""}`}
+                  onClick={() => void setIncrementalDataMode("A", "hash")}>
+                  {t(settings.language, "modeHash")}
+                </button>
+              </div>
+              <div className="controls wrap">
+                <span className="settings-label">B:</span>
+                <button
+                  className={`page-btn ${templateState.incrementalSetBMode === "url" ? "active" : ""}`}
+                  onClick={() => void setIncrementalDataMode("B", "url")}>
+                  {t(settings.language, "modeUrl")}
+                </button>
+                <button
+                  className={`page-btn ${templateState.incrementalSetBMode === "hash" ? "active" : ""}`}
+                  onClick={() => void setIncrementalDataMode("B", "hash")}>
+                  {t(settings.language, "modeHash")}
+                </button>
+              </div>
+
+              <div className="settings-label">{t(settings.language, "incrementalSetASelection")}</div>
+              <p className="muted">{tf(settings.language, "incrementalSetASelectedCount", { count: incrementalSetAFolderIds.length })}</p>
+              <div className="folder-list">
+                <FolderTreeView
+                  nodes={folderTree}
+                  expandedFolderIds={expandedFolderIds}
+                  selectedFolderIds={incrementalSetAFolderIds}
+                  onToggleExpanded={toggleExpanded}
+                  onToggleSelected={toggleIncrementalSetAFolder}
+                />
+              </div>
+              <div className="controls wrap">
+                <button className="link-btn" onClick={() => void useLastCompareSetA()}>{t(settings.language, "useLastCompareSetA")}</button>
+                <button className="link-btn" onClick={() => setIncrementalSetAFolderIds([])}>{t(settings.language, "clear")}</button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="settings-group">
+            <div className="settings-label">{t(settings.language, "templateImportExport")}</div>
+            <div className="controls wrap">
+              <button className="link-btn" onClick={() => void exportTemplatesByMode()}>{t(settings.language, "exportTemplateSet")}</button>
+            </div>
+            <input
+              type="file"
+              accept="application/json,.json"
+              onChange={(e) => setTemplateImportFile(e.target.files?.[0] ?? null)}
+            />
+            <button className="btn warn" onClick={() => void importTemplatesByModeFromFile()}>{t(settings.language, "importTemplateSet")}</button>
           </div>
         </section>
       ) : null}
@@ -864,20 +1215,23 @@ function IndexPopup() {
           <section className="card">
             <h2>{t(settings.language, "exportTitle")}</h2>
             <p className="muted">{tf(settings.language, "activeTemplate", { name: activeTemplate.name })}</p>
+            <p className="muted">{tf(settings.language, "activeMode", { mode: t(settings.language, `mode${templateState.exportMode[0].toUpperCase()}${templateState.exportMode.slice(1)}`) })}</p>
             <label className="check">
               <input type="checkbox" checked={slimMode} onChange={(e) => setSlimMode(e.target.checked)} />
               <span>{t(settings.language, "slimMode")}</span>
             </label>
-            <button className="btn primary" onClick={() => void exportJson(false)}>{t(settings.language, "exportJson")}</button>
             <div className="btn-group">
-              <button className="btn ok" onClick={() => void exportAiPrompt()}>{t(settings.language, "generatePrompt")}</button>
-              <button className="btn ok" onClick={() => void generateHashAiPrompt()}>{t(settings.language, "generateHashPrompt")}</button>
+              <button className="btn primary" onClick={() => void exportJson(false)}>{t(settings.language, "exportJson")}</button>
+              <button className="btn primary" onClick={() => void exportStandardHtml()}>{t(settings.language, "exportStandardHtml")}</button>
+            </div>
+            <div className="btn-group single">
+              <button className="btn ok" onClick={() => void generatePromptByCurrentMode()}>{t(settings.language, "generatePromptByMode")}</button>
             </div>
           </section>
 
           <section className="card">
             <h2>{t(settings.language, "promptPreview")}</h2>
-            <div className="controls">
+            <div className="controls prompt-toolbar-sticky">
               <button className={`link-btn feedback-btn ${copyPromptSuccess ? "success" : ""}`} onClick={() => void copyAiPrompt()}>
                 {copyPromptSuccess ? t(settings.language, "copied") : t(settings.language, "copyPrompt")}
               </button>
@@ -891,19 +1245,18 @@ function IndexPopup() {
       {activePage === "import" ? (
         <section className="card">
           <h2>{t(settings.language, "importTitle")}</h2>
+          <p className="muted">{tf(settings.language, "importModeFromTemplate", { mode: t(settings.language, `mode${effectiveImportMode[0].toUpperCase()}${effectiveImportMode.slice(1)}`) })}</p>
           <label className="check">
             <input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)} />
             <span>{t(settings.language, "autoBackup")}</span>
           </label>
           <input type="file" accept="application/json,.json,text/yaml,.yaml,.yml" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} />
-          <div className="btn-group">
-            <button className="btn warn" onClick={() => void importFromFile()}>{t(settings.language, "importUrlModeLabel")}: {t(settings.language, "importFromFile")}</button>
-            <button className="btn warn" onClick={() => void importFromFileHash()}>{t(settings.language, "importHashModeLabel")}: {t(settings.language, "importFromFile")}</button>
+          <div className="btn-group single">
+            <button className="btn warn" onClick={() => void importByCurrentModeFromFile()}>{t(settings.language, "importFromFile")}</button>
           </div>
           <textarea className="paste-input" placeholder={t(settings.language, "pastePlaceholder")} value={pastedData} onChange={(e) => setPastedData(e.target.value)} />
-          <div className="btn-group">
-            <button className="btn warn" onClick={() => void importFromPastedData()}>{t(settings.language, "importUrlModeLabel")}: {t(settings.language, "importFromPaste")}</button>
-            <button className="btn warn" onClick={() => void importFromPastedDataHash()}>{t(settings.language, "importHashModeLabel")}: {t(settings.language, "importFromPaste")}</button>
+          <div className="btn-group single">
+            <button className="btn warn" onClick={() => void importByCurrentModeFromPaste()}>{t(settings.language, "importFromPaste")}</button>
           </div>
         </section>
       ) : null}

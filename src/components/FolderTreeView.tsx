@@ -1,3 +1,4 @@
+import "./FolderTreeView.css"
 import type { FolderTreeNode } from "../types/bookmark"
 
 type FolderTreeViewProps = {

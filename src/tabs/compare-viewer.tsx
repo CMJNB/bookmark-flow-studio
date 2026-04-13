@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import "./compare-viewer.css"
 import { CompareEntryList } from "../components/CompareEntryList"
@@ -7,20 +7,21 @@ import { PageHeader } from "../components/PageHeader"
 import { TabButton } from "../components/TabButton"
 import { EmptyState } from "../components/EmptyState"
 import { OptionSelector } from "../components/OptionSelector"
-import { buildCompareViewerRows, compareBookmarkSelections } from "../lib/compare-utils"
-import type { CompareResult, CompareStats, CompareViewerRow } from "../lib/compare-utils"
+import { buildCompareViewerRows, buildRepairCandidates, compareBookmarkSelections } from "../lib/compare-utils"
+import type { CompareResult, CompareStats, CompareViewerRow, RepairCandidate } from "../lib/compare-utils"
 import { saveCompareViewerState } from "../lib/compare-viewer-state"
-import { getTree, openPopupWindow } from "../lib/chrome-api"
+import { downloadTextFile, getTree, openPopupWindow } from "../lib/chrome-api"
+import { buildHtmlTreeFromEntries, bookmarkTreeToHtml } from "../lib/bookmark-html"
 import {
   buildSelectedExportRoots,
   flattenFolderTreeIds,
   flattenNodes,
   getDescendantFolderIds
 } from "../lib/bookmark-utils"
+import { formatDateForFileName } from "../lib/format"
 import { useAppSettings } from "../lib/use-app-settings"
 import { useBookmarkTree } from "../lib/use-bookmark-tree"
 import { t, tf } from "../lib/i18n"
-import type { FolderTreeNode } from "../types/bookmark"
 
 type CompareFilter = "title-only" | "url-only" | "url-title-change" | "title-url-conflict"
 
@@ -76,9 +77,58 @@ function CompareViewerPage() {
   const [filter, setFilter] = useState<CompareFilter>("title-only")
   const [rowSortBy, setRowSortBy] = useState<RowSortBy>("original")
   const [actionStatus, setActionStatus] = useState("")
+  const [selectedRepairSourceIds, setSelectedRepairSourceIds] = useState<Record<string, string>>({})
   const allNodes = useMemo(() => flattenNodes(tree), [tree])
+  const repairCandidates = useMemo<RepairCandidate[]>(() => {
+    if (!compareResult) {
+      return []
+    }
+
+    return buildRepairCandidates(compareResult)
+  }, [compareResult])
+  const ambiguousRepairCandidates = useMemo(
+    () => repairCandidates.filter((candidate) => candidate.aEntries.length > 1),
+    [repairCandidates]
+  )
+  const repairBookmarkCount = useMemo(
+    () => repairCandidates.reduce((sum, candidate) => sum + candidate.bEntries.length, 0),
+    [repairCandidates]
+  )
 
   const filteredRows = useMemo(() => sortViewerRows(rows.filter((row) => row.kind === filter), rowSortBy), [filter, rows, rowSortBy])
+
+  useEffect(() => {
+    if (repairCandidates.length === 0) {
+      setSelectedRepairSourceIds({})
+      return
+    }
+
+    setSelectedRepairSourceIds((prev) => {
+      const next = { ...prev }
+      let changed = false
+      const validIds = new Set(repairCandidates.flatMap((candidate) => candidate.bEntries.map((entry) => entry.id)))
+
+      for (const key of Object.keys(next)) {
+        if (!validIds.has(key)) {
+          delete next[key]
+          changed = true
+        }
+      }
+
+      for (const candidate of repairCandidates) {
+        for (const target of candidate.bEntries) {
+          const targetKey = target.id
+          const current = next[targetKey]
+          if (!current || !candidate.aEntries.some((entry) => entry.id === current)) {
+            next[targetKey] = candidate.aEntries[0].id
+            changed = true
+          }
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [repairCandidates])
 
   const rowKindLabel = (row: CompareViewerRow): string => {
     if (row.kind === "title-only") {
@@ -187,6 +237,68 @@ function CompareViewerPage() {
     setActionStatus("")
   }
 
+  const exportRepairHtml = async (): Promise<void> => {
+    if (repairCandidates.length === 0 || !compareResult) {
+      setActionStatus(t(settings.language, "floatingCompareRepairNoCandidate"))
+      return
+    }
+
+    try {
+      const selectedSourceDateByBEntryId = new Map<string, number | undefined>()
+
+      for (const candidate of repairCandidates) {
+        for (const target of candidate.bEntries) {
+          const selectedSourceId = selectedRepairSourceIds[target.id] ?? candidate.aEntries[0].id
+          const source = candidate.aEntries.find((entry) => entry.id === selectedSourceId) ?? candidate.aEntries[0]
+          selectedSourceDateByBEntryId.set(target.id, source.dateAdded)
+        }
+      }
+
+      // Keep the exact traversal order from set B and preserve all B items.
+      // Only patch dateAdded for entries that have an explicit A-source mapping.
+      const repairedEntries = compareResult.allEntriesB.map((entry) => {
+        const mappedDateAdded = selectedSourceDateByBEntryId.get(entry.id)
+        if (typeof mappedDateAdded !== "number") {
+          return entry
+        }
+
+        return {
+          ...entry,
+          dateAdded: mappedDateAdded
+        }
+      })
+
+      const stamp = formatDateForFileName(new Date())
+      const folderTitle = `${t(settings.language, "floatingCompareRepairFolderPrefix")} ${stamp}`
+      const html = bookmarkTreeToHtml(
+        [
+          {
+            title: folderTitle,
+            dateGroupModified: Date.now(),
+            children: buildHtmlTreeFromEntries(repairedEntries)
+          }
+        ],
+        folderTitle
+      )
+      const fileName = `bookmarks-repair-${stamp}.html`
+
+      await downloadTextFile(fileName, html, "text/html;charset=utf-8")
+      setActionStatus(
+        tf(settings.language, "floatingCompareRepairExported", {
+          fileName,
+          urls: repairCandidates.length,
+          count: repairedEntries.length
+        })
+      )
+    } catch (error) {
+      setActionStatus(
+        tf(settings.language, "floatingCompareRepairExportFailed", {
+          error: (error as Error).message
+        })
+      )
+    }
+  }
+
   return (
     <main className="compare-viewer-app">
       <PageHeader
@@ -236,6 +348,83 @@ function CompareViewerPage() {
       ) : null}
 
       {actionStatus ? <section className="compare-viewer-inline-status">{actionStatus}</section> : null}
+
+      {!loadError && compareResult ? (
+        <section className="compare-viewer-repair-panel">
+          <div className="compare-viewer-repair-head">
+            <div>
+              <h2>{t(settings.language, "floatingCompareRepairTitle")}</h2>
+              <p>{t(settings.language, "floatingCompareRepairHint")}</p>
+            </div>
+            <button className="page-btn" onClick={() => void exportRepairHtml()}>
+              {t(settings.language, "floatingCompareRepairExport")}
+            </button>
+          </div>
+
+          <div className="compare-viewer-repair-stats">
+            <div className="compare-viewer-stat-item">{t(settings.language, "floatingCompareRepairUrlCount")}: {repairCandidates.length}</div>
+            <div className="compare-viewer-stat-item">{t(settings.language, "floatingCompareRepairBookmarkCount")}: {repairBookmarkCount}</div>
+            <div className="compare-viewer-stat-item">{t(settings.language, "floatingCompareRepairConflictCount")}: {ambiguousRepairCandidates.length}</div>
+          </div>
+
+          <div className="compare-viewer-repair-note">{t(settings.language, "floatingCompareRepairNotice")}</div>
+
+          {ambiguousRepairCandidates.length > 0 ? (
+            <div className="compare-viewer-repair-choice-list">
+              {ambiguousRepairCandidates.map((candidate) => (
+                <article key={candidate.id} className="compare-viewer-repair-choice-card">
+                  <div className="compare-viewer-repair-choice-head">
+                    <h3>{candidate.url}</h3>
+                    <div className="compare-viewer-entry-sub">
+                      {tf(settings.language, "floatingCompareRepairTargetCount", { count: candidate.bEntries.length })}
+                    </div>
+                  </div>
+
+                  <div className="compare-viewer-repair-targets">
+                    {candidate.bEntries.map((entry, index) => (
+                      <div key={`${candidate.id}-target-${entry.id}-${index}`} className="compare-viewer-repair-target-block">
+                        <div className="compare-viewer-entry-sub">
+                          {t(settings.language, "floatingCompareRepairTarget")}: {entry.title || t(settings.language, "emptyTitle")} · {entry.path || t(settings.language, "rootPath")}{entry.dateAdded ? ` · ${t(settings.language, "dateAdded")}: ${new Date(entry.dateAdded).toLocaleString(settings.language)}` : ""}
+                        </div>
+                        <div className="compare-viewer-repair-options">
+                          {candidate.aEntries.map((sourceEntry, sourceIndex) => {
+                            const inputId = `${candidate.id}-${entry.id}-${sourceEntry.id}-${sourceIndex}`
+                            const timeLabel = sourceEntry.dateAdded
+                              ? new Date(sourceEntry.dateAdded).toLocaleString(settings.language)
+                              : t(settings.language, "none")
+
+                            return (
+                              <label key={inputId} className="compare-viewer-repair-option" htmlFor={inputId}>
+                                <input
+                                  id={inputId}
+                                  type="radio"
+                                  name={`${candidate.id}-${entry.id}`}
+                                  checked={selectedRepairSourceIds[entry.id] === sourceEntry.id}
+                                  onChange={() =>
+                                    setSelectedRepairSourceIds((prev) => ({
+                                      ...prev,
+                                      [entry.id]: sourceEntry.id
+                                    }))
+                                  }
+                                />
+                                <span>
+                                  {sourceEntry.title || t(settings.language, "emptyTitle")} · {sourceEntry.path || t(settings.language, "rootPath")} · {timeLabel}
+                                </span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="compare-viewer-repair-note">{t(settings.language, "floatingCompareRepairNoConflict")}</div>
+          )}
+        </section>
+      ) : null}
 
       <section className="compare-set-editor-grid">
         <CompareSetEditor
