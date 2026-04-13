@@ -2,71 +2,94 @@
 
 English | [简体中文](README.zh-CN.md)
 
-A Chrome extension built with Plasmo for bookmark export, AI prompt generation, import, comparison, and tree-style editing.
+A productivity-focused Chrome extension for heavy bookmark workflows: export, import, A/B compare, timestamp repair, template-based AI prompts, and tree-style batch editing in one place.
 
-## Key Features
+## Use Cases
+
+- Clean up and reorganize bookmarks after browser migration.
+- Feed bookmark structures into AI using reusable templates.
+- Compare A/B sets and repair timestamp fields in standard HTML bookmarks.
+- Perform tree editing and batch operations directly inside the extension.
+
+## Core Capabilities
+
+### 1. Export and Prompting
 
 - Read the full Chrome bookmark tree.
 - Select folders and export JSON in full/slim modes.
-- Generate AI prompts with YAML bookmark data.
-- Manage multiple prompt templates and switch active template.
-- Generate hash-mode prompts and resolve hash-based imports.
-- Import JSON/YAML to rebuild bookmark structures.
-- Optional backup before import.
-- A/B selection comparison in a floating viewer.
-- Global compare search page with filtering and sorting.
-- Bookmark editor page with tree editing:
-  - Search and locate
-  - Open bookmark links safely
-  - Create folder/bookmark
-  - Multi-select, drag and drop
-  - Copy/cut/paste and batch operations
-- Bilingual UI (zh-CN / en-US) and theme support (light/dark/system).
+- Generate AI prompts with YAML bookmark payloads.
+- Manage, edit, and switch prompt templates.
+- Support hash-mode prompts and hash-based import parsing.
+
+### 2. Import and Safety
+
+- Import JSON/YAML and rebuild bookmark structures.
+- Optional automatic backup before import.
+- Import into a new root folder by default to avoid destructive overwrite.
+
+### 3. A/B Compare and Search
+
+- Compare selected A/B sets.
+- Sort and filter compare results.
+- Dedicated compare search page for quick location.
+- Added-time display in key bookmark-item views for better source and recency judgment.
+
+### 4. Standard HTML Timestamp Repair
+
+- Timestamp repair is now a dedicated page and no longer occupies the default compare view.
+- Uses B as the target set and only updates timestamp fields for matched URLs.
+- Preserves B order in exported output.
+- Supports per-B-item source selection when the same URL appears multiple times in A.
+
+### 5. Tree Editor
+
+- Search and locate nodes.
+- Open bookmark links safely.
+- Create folders/bookmarks.
+- Multi-select, drag and drop, copy/cut/paste, and batch actions.
+
+### 6. UX and i18n
+
+- Bilingual UI (zh-CN / en-US).
+- Theme support: light, dark, and system.
 
 ## Tech Stack
 
 - Plasmo (Manifest V3)
 - React 18 + TypeScript
-- react-arborist (tree editor)
+- react-arborist
 - yaml
 
-## Development
+## Quick Start
 
 1. Install dependencies
 
-    ```bash
-    npm install
-    ```
+```bash
+npm install
+```
 
-2. Start development build
+2. Start development mode
 
-    ```bash
-    npm run dev
-    ```
+```bash
+npm run dev
+```
 
-3. Open `chrome://extensions/`, enable Developer Mode, then load the generated directory (usually `build/chrome-mv3-dev`).
+3. Open `chrome://extensions/`, enable Developer Mode, then load the generated folder (usually `build/chrome-mv3-dev`).
 
 ## Build and Package
 
-Build production assets:
-
 ```bash
 npm run build
-```
-
-Create extension package:
-
-```bash
 npm run package
 ```
 
 ## Permissions
 
-- `bookmarks`
-- `downloads`
-- `storage`
+- `bookmarks`: read/write bookmark tree.
+- `downloads`: export and backup download.
+- `storage`: persist templates and page state.
 
-## Import Data Format
+## Import Format Examples
 
 Array form:
 
@@ -87,8 +110,3 @@ Object form with `children`:
   "children": [{ "title": "Google", "url": "https://www.google.com" }]
 }
 ```
-
-## Notes
-
-- Import creates a new root folder to avoid destructive overwrite.
-- If auto backup is enabled, a full bookmark JSON backup is downloaded before import.
